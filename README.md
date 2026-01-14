@@ -90,10 +90,15 @@ AI Agent      →  Hook Scripts  →  Server (:5174)  →  Client (:5173)
   - 🟢 Green glow = writing
   - ⚪ Idle = folder name displayed
 - **Multi-agent Support**: See multiple agents working simultaneously (up to 10)
-- **Agent States**: 
+- **Agent States**:
   - 🟡 Thinking indicator above agent
   - Name tags for each agent
   - Walking animations when moving between rooms
+  - 💬 Speech bubbles showing current tool and file being operated on
+- **Cursor-Specific Features** (when using Cursor IDE):
+  - 🏷️ Model name displayed below agent (e.g., "3.5-sonnet")
+  - ✅ Completion badges: green ✓ (completed), orange ! (aborted), red ✗ (error)
+  - ⏱️ Operation duration shown in speech bubble (e.g., "Bash (2.3s)")
 
 ### Navigation
 
@@ -104,8 +109,11 @@ AI Agent      →  Hook Scripts  →  Server (:5174)  →  Client (:5173)
 ### Compatibility
 
 - ✅ **Claude Code**: Full support via `.claude/settings.local.json`
-- ✅ **Cursor**: Full support via `.cursor/hooks.json`
-- Universal hooks work with both tools automatically
+- ✅ **Cursor**: Full support via `.cursor/hooks.json` with enhanced features:
+  - Model name display (from Cursor hook data)
+  - Completion status badges (from stop events)
+  - Operation duration tracking (from shell/MCP execution)
+- Universal hooks work with both tools (Cursor extras gracefully degrade for Claude Code)
 
 ---
 
@@ -138,9 +146,10 @@ AI Agent      →  Hook Scripts  →  Server (:5174)  →  Client (:5173)
 ### Hooks (`hooks/`)
 
 - **`file-activity-hook.sh`**: Captures file operations (read/write start/end)
-- **`thinking-hook.sh`**: Captures agent thinking state and tool usage
+- **`thinking-hook.sh`**: Captures agent thinking state, tool usage, model name, and duration
+- **`cursor-stop-hook.sh`**: Captures Cursor agent completion status (completed/aborted/error)
 - **`git-post-commit.sh`**: Notifies server to refresh layout after each commit
-- Both hooks work with Claude Code and Cursor automatically
+- All hooks work with both Claude Code and Cursor (Cursor-specific features gracefully degrade)
 
 ---
 
@@ -220,6 +229,7 @@ codemap/
 ├── hooks/
 │   ├── file-activity-hook.sh
 │   ├── thinking-hook.sh
+│   ├── cursor-stop-hook.sh
 │   └── git-post-commit.sh
 ├── server/
 │   └── src/
