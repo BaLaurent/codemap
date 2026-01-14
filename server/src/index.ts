@@ -260,7 +260,7 @@ app.post('/api/activity', (req, res) => {
 // Receive thinking events
 app.post('/api/thinking', (req, res) => {
   const event: ThinkingEvent = req.body;
-  const { agentId, type, toolName, toolInput, agentType } = event;
+  const { agentId, type, toolName, toolInput, agentType, model, duration, status } = event;
   const now = Date.now();
 
   // Register or get existing agent using safe registration
@@ -268,6 +268,19 @@ app.post('/api/thinking', (req, res) => {
   if (!state) {
     // Agent registration was rejected - still return success to not block hooks
     res.status(200).json({ success: true, rejected: true });
+    return;
+  }
+
+  // Handle agent-stop events (from Cursor stop hook)
+  if (type === 'agent-stop') {
+    if (status) {
+      state.status = status;
+      state.statusTimestamp = now;
+      state.isThinking = false;
+      console.log(`[${new Date().toISOString()}] AGENT-STOP: ${state.displayName} status=${status}`);
+    }
+    wsManager.broadcast('thinking', getAgentStatesArray());
+    res.status(200).json({ success: true });
     return;
   }
 
@@ -301,6 +314,23 @@ app.post('/api/thinking', (req, res) => {
     state.displayName = `${sourceName} ${typeLabel} ${num}`;
   }
 
+  // Update model if provided (Cursor provides this, persists for agent lifetime)
+  if (model && !state.model) {
+    state.model = model;
+    console.log(`[${new Date().toISOString()}] Agent ${state.displayName} using model: ${model}`);
+  }
+
+  // Update duration if provided (from afterShellExecution, afterMCPExecution)
+  if (duration !== undefined && duration !== null) {
+    state.lastDuration = duration;
+  }
+
+  // Clear status after activity resumes (agent is working again)
+  if (state.status && type === 'thinking-end') {
+    state.status = undefined;
+    state.statusTimestamp = undefined;
+  }
+
   // Set waitingForInput for AskUserQuestion tool
   if (type === 'thinking-end' && toolName === 'AskUserQuestion') {
     state.waitingForInput = true;
@@ -310,7 +340,8 @@ app.post('/api/thinking', (req, res) => {
     state.waitingForInput = false;
   }
 
-  console.log(`[${new Date().toISOString()}] ${type.toUpperCase()}: ${state.displayName} ${toolName ? `(${toolName})` : ''}${toolInput ? ` [${toolInput}]` : ''}`);
+  const durationStr = duration ? ` (${duration}ms)` : '';
+  console.log(`[${new Date().toISOString()}] ${type.toUpperCase()}: ${state.displayName} ${toolName ? `(${toolName})` : ''}${toolInput ? ` [${toolInput}]` : ''}${durationStr}`);
 
   // Broadcast all agent states to connected clients
   wsManager.broadcast('thinking', getAgentStatesArray());

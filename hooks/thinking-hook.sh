@@ -49,13 +49,19 @@ esac
 # Extract agent type if available (from SessionStart or agent field)
 AGENT_TYPE=$(echo "$INPUT" | /usr/bin/jq -r '.agent_type // .agent // empty' 2>/dev/null)
 
+# Extract model name (Cursor provides this in all hooks)
+MODEL=$(echo "$INPUT" | /usr/bin/jq -r '.model // empty' 2>/dev/null)
+
+# Extract duration if available (Cursor afterShellExecution, afterMCPExecution)
+DURATION=$(echo "$INPUT" | /usr/bin/jq -r '.duration // .duration_ms // empty' 2>/dev/null)
+
 # Detect source for logging (optional)
 SOURCE="unknown"
 echo "$INPUT" | /usr/bin/jq -e '.session_id' >/dev/null 2>&1 && SOURCE="claude"
 echo "$INPUT" | /usr/bin/jq -e '.conversation_id' >/dev/null 2>&1 && SOURCE="cursor"
 
 # Log for debugging
-echo "$(date): [$SOURCE] THINKING $EVENT_TYPE agent=${AGENT_ID:0:8} tool=$TOOL_NAME input=$TOOL_INPUT" >> "$LOG_FILE"
+echo "$(date): [$SOURCE] THINKING $EVENT_TYPE agent=${AGENT_ID:0:8} tool=$TOOL_NAME model=$MODEL duration=$DURATION" >> "$LOG_FILE"
 
 # Build JSON payload with all available fields
 # Start with base fields
@@ -72,6 +78,12 @@ if [ -n "$TOOL_INPUT" ]; then
 fi
 if [ -n "$AGENT_TYPE" ]; then
     JSON_PAYLOAD="$JSON_PAYLOAD,\"agentType\":\"$AGENT_TYPE\""
+fi
+if [ -n "$MODEL" ]; then
+    JSON_PAYLOAD="$JSON_PAYLOAD,\"model\":\"$MODEL\""
+fi
+if [ -n "$DURATION" ] && [ "$DURATION" != "null" ]; then
+    JSON_PAYLOAD="$JSON_PAYLOAD,\"duration\":$DURATION"
 fi
 
 # Close the JSON object

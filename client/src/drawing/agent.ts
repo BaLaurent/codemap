@@ -219,6 +219,53 @@ export const drawAgentCharacter = (ctx: CanvasRenderingContext2D, char: AgentCha
   ctx.fillStyle = '#FFFFFF';
   ctx.fillText(char.displayName, cx, cy - 51);
 
+  // Model label (below name, smaller, gray)
+  if (char.model) {
+    // Abbreviate model name: "claude-3.5-sonnet" → "3.5-sonnet"
+    let modelShort = char.model;
+    if (modelShort.startsWith('claude-')) {
+      modelShort = modelShort.replace('claude-', '');
+    } else if (modelShort.startsWith('gpt-')) {
+      modelShort = modelShort.replace('gpt-', 'gpt');
+    }
+    // Truncate if too long
+    if (modelShort.length > 15) {
+      modelShort = modelShort.slice(0, 12) + '...';
+    }
+    ctx.font = '8px monospace';
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    ctx.fillText(modelShort, cx + 1, cy - 41);
+    ctx.fillStyle = '#AAAAAA';
+    ctx.fillText(modelShort, cx, cy - 42);
+  }
+
+  // Status badge (completion indicator)
+  if (char.status) {
+    const statusConfig = {
+      completed: { icon: '✓', bg: '#4CAF50', fg: '#FFFFFF' },
+      aborted: { icon: '!', bg: '#FF9800', fg: '#FFFFFF' },
+      error: { icon: '✗', bg: '#F44336', fg: '#FFFFFF' }
+    };
+    const config = statusConfig[char.status];
+    const badgeX = cx + 20;
+    const badgeY = cy - 55;
+
+    // Badge background
+    ctx.beginPath();
+    ctx.arc(badgeX, badgeY, 8, 0, Math.PI * 2);
+    ctx.fillStyle = config.bg;
+    ctx.fill();
+    ctx.strokeStyle = '#FFFFFF';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Badge icon
+    ctx.font = 'bold 10px sans-serif';
+    ctx.fillStyle = config.fg;
+    ctx.textAlign = 'center';
+    ctx.fillText(config.icon, badgeX, badgeY + 3);
+  }
+
   // ZZZ animation when idle
   if (char.isIdle) {
     ctx.font = 'bold 12px monospace';
@@ -250,8 +297,18 @@ export const drawAgentCharacter = (ctx: CanvasRenderingContext2D, char: AgentCha
     const textColor = isStuck ? '#604000' : '#333333';
     const secondaryColor = '#666666';
 
-    // Primary text (tool name or stuck message)
-    const primaryText = isStuck ? "Hey! I'm stuck!" : char.currentCommand!;
+    // Format duration if available
+    let durationStr = '';
+    if (!isStuck && char.lastDuration !== undefined) {
+      if (char.lastDuration < 1000) {
+        durationStr = ` (${char.lastDuration}ms)`;
+      } else {
+        durationStr = ` (${(char.lastDuration / 1000).toFixed(1)}s)`;
+      }
+    }
+
+    // Primary text (tool name or stuck message) with optional duration
+    const primaryText = isStuck ? "Hey! I'm stuck!" : char.currentCommand! + durationStr;
     // Secondary text (tool input - file, command, pattern)
     const secondaryText = !isStuck && char.toolInput ? char.toolInput : null;
 

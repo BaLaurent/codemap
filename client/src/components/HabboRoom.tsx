@@ -488,6 +488,11 @@ export function HabboRoom() {
             existing.lastActivity = agent.lastActivity;
             existing.lastSeen = now;  // Mark as seen
             existing.isThinking = agent.isThinking;
+            // Cursor-specific fields
+            existing.model = agent.model;
+            existing.lastDuration = agent.lastDuration;
+            existing.status = agent.status;
+            existing.statusTimestamp = agent.statusTimestamp;
             // Play sound when agent starts waiting for input
             const newWaitingState = agent.waitingForInput ?? false;
             if (newWaitingState && !existing.waitingForInput) {
@@ -539,6 +544,11 @@ export function HabboRoom() {
               lastActivity: agent.lastActivity,
               lastSeen: now,
               isThinking: agent.isThinking,
+              // Cursor-specific fields
+              model: agent.model,
+              lastDuration: agent.lastDuration,
+              status: agent.status,
+              statusTimestamp: agent.statusTimestamp,
             });
           }
         }

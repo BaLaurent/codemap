@@ -11,6 +11,9 @@ export interface Character {
   frame: number;
 }
 
+/** Agent status from stop events */
+export type AgentStatus = 'completed' | 'aborted' | 'error';
+
 export interface AgentCharacter extends Character {
   agentId: string;
   displayName: string;
@@ -23,6 +26,10 @@ export interface AgentCharacter extends Character {
   lastSeen: number;  // When agent was last seen in server's list (for grace period removal)
   isThinking?: boolean;
   agentType?: string;  // Agent type (Plan, Explore, Bash, etc.)
+  model?: string;  // Model name (e.g., "claude-3.5-sonnet")
+  lastDuration?: number;  // Last operation duration in ms
+  status?: AgentStatus;  // Completion status
+  statusTimestamp?: number;  // When status was set
 }
 
 export interface RoomLayout {

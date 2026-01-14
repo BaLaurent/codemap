@@ -12,6 +12,9 @@ export interface ThinkingEvent {
   timestamp: number;
 }
 
+/** Agent status from stop events */
+export type AgentStatus = 'completed' | 'aborted' | 'error';
+
 export interface AgentThinkingState {
   agentId: string;
   isThinking: boolean;
@@ -21,6 +24,10 @@ export interface AgentThinkingState {
   toolInput?: string;  // Abbreviated tool input (file path, command, pattern)
   waitingForInput?: boolean;  // True when agent is waiting for user input
   agentType?: string;  // Agent type (Plan, Explore, Bash, etc.)
+  model?: string;  // Model name (e.g., "claude-3.5-sonnet")
+  lastDuration?: number;  // Last operation duration in ms
+  status?: AgentStatus;  // Completion status (completed/aborted/error)
+  statusTimestamp?: number;  // When status was set
 }
 
 export interface GraphNode {
