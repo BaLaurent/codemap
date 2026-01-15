@@ -105,12 +105,28 @@ describe('Agent naming by source', () => {
   }
 
   let agentStates: Map<string, AgentThinkingState>;
-  let agentCounterBySource: Record<string, number>;
+
+  function getNextAgentNumber(source: 'claude' | 'cursor' | 'unknown'): number {
+    const usedNumbers = new Set<number>();
+    for (const state of agentStates.values()) {
+      if (state.source === source) {
+        const match = state.displayName.match(/(\d+)$/);
+        if (match) {
+          usedNumbers.add(parseInt(match[1], 10));
+        }
+      }
+    }
+    let num = 1;
+    while (usedNumbers.has(num)) {
+      num++;
+    }
+    return num;
+  }
 
   function registerAgent(
     agentId: string,
     timestamp: number,
-    eventSource: string,
+    _eventSource: string,
     agentSource: 'claude' | 'cursor' | 'unknown' = 'unknown'
   ): AgentThinkingState | null {
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -127,10 +143,10 @@ describe('Agent naming by source', () => {
       return null;
     }
 
-    agentCounterBySource[agentSource]++;
-    const sourceName = agentSource === 'claude' ? 'Claude' :
+    const agentNumber = getNextAgentNumber(agentSource);
+    const sourceName = agentSource === 'claude' ? 'Claude Code' :
                        agentSource === 'cursor' ? 'Cursor' : 'Agent';
-    const displayName = `${sourceName} ${agentCounterBySource[agentSource]}`;
+    const displayName = `${sourceName} ${agentNumber}`;
 
     state = {
       agentId,
@@ -145,15 +161,14 @@ describe('Agent naming by source', () => {
 
   beforeEach(() => {
     agentStates = new Map();
-    agentCounterBySource = { claude: 0, cursor: 0, unknown: 0 };
   });
 
-  it('names Claude agents as "Claude 1", "Claude 2", etc.', () => {
+  it('names Claude agents as "Claude Code 1", "Claude Code 2", etc.', () => {
     const agent1 = registerAgent('a7982537-1234-5678-9abc-def012345678', Date.now(), 'thinking', 'claude');
     const agent2 = registerAgent('b7982537-1234-5678-9abc-def012345678', Date.now(), 'thinking', 'claude');
 
-    expect(agent1?.displayName).toBe('Claude 1');
-    expect(agent2?.displayName).toBe('Claude 2');
+    expect(agent1?.displayName).toBe('Claude Code 1');
+    expect(agent2?.displayName).toBe('Claude Code 2');
   });
 
   it('names Cursor agents as "Cursor 1", "Cursor 2", etc.', () => {
@@ -177,9 +192,9 @@ describe('Agent naming by source', () => {
     const cursor1 = registerAgent('b1982537-1234-5678-9abc-def012345678', Date.now(), 'thinking', 'cursor');
     const claude2 = registerAgent('c1982537-1234-5678-9abc-def012345678', Date.now(), 'thinking', 'claude');
 
-    expect(claude1?.displayName).toBe('Claude 1');
+    expect(claude1?.displayName).toBe('Claude Code 1');
     expect(cursor1?.displayName).toBe('Cursor 1');
-    expect(claude2?.displayName).toBe('Claude 2');
+    expect(claude2?.displayName).toBe('Claude Code 2');
   });
 
   it('returns existing agent on duplicate registration', () => {
@@ -188,7 +203,7 @@ describe('Agent naming by source', () => {
     const agent2 = registerAgent(agentId, Date.now(), 'activity', 'claude');
 
     expect(agent1).toBe(agent2);
-    expect(agent1?.displayName).toBe('Claude 1');
+    expect(agent1?.displayName).toBe('Claude Code 1');
     expect(agentStates.size).toBe(1);
   });
 

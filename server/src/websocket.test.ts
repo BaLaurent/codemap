@@ -327,7 +327,7 @@ describe('WebSocket: Message Format', () => {
       data: [
         {
           agentId: 'abc-123',
-          displayName: 'Claude 1',
+          displayName: 'Claude Code 1',
           isThinking: true,
           currentCommand: 'Read',
           lastActivity: 1234567890
@@ -338,6 +338,6 @@ describe('WebSocket: Message Format', () => {
     const parsed = JSON.parse(message);
     expect(parsed.type).toBe('thinking');
     expect(parsed.data).toHaveLength(1);
-    expect(parsed.data[0].displayName).toBe('Claude 1');
+    expect(parsed.data[0].displayName).toBe('Claude Code 1');
   });
 });

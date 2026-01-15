@@ -349,7 +349,7 @@ describe('CRITICAL: Activity Feed Entry Creation', () => {
 
   describe('Event filtering', () => {
     it('MUST only create entries for -end events', () => {
-      const agents = [{ agentId: 'abc123', displayName: 'Claude 1' }];
+      const agents = [{ agentId: 'abc123', displayName: 'Claude Code 1' }];
 
       const readStart = createActivityEntry(
         { type: 'read-start', filePath: 'test.ts', agentId: 'abc123' },
@@ -365,7 +365,7 @@ describe('CRITICAL: Activity Feed Entry Creation', () => {
     });
 
     it('MUST correctly identify read vs write events', () => {
-      const agents = [{ agentId: 'abc123', displayName: 'Claude 1' }];
+      const agents = [{ agentId: 'abc123', displayName: 'Claude Code 1' }];
 
       const readEntry = createActivityEntry(
         { type: 'read-end', filePath: 'test.ts', agentId: 'abc123' },
@@ -384,7 +384,7 @@ describe('CRITICAL: Activity Feed Entry Creation', () => {
   describe('Agent name resolution', () => {
     it('MUST resolve agent display name from agents list', () => {
       const agents = [
-        { agentId: 'agent-1', displayName: 'Claude 1' },
+        { agentId: 'agent-1', displayName: 'Claude Code 1' },
         { agentId: 'agent-2', displayName: 'Cursor 1' },
       ];
 
@@ -396,7 +396,7 @@ describe('CRITICAL: Activity Feed Entry Creation', () => {
     });
 
     it('MUST fall back to "Unknown" for unregistered agent', () => {
-      const agents = [{ agentId: 'known-agent', displayName: 'Claude 1' }];
+      const agents = [{ agentId: 'known-agent', displayName: 'Claude Code 1' }];
 
       const entry = createActivityEntry(
         { type: 'read-end', filePath: 'test.ts', agentId: 'unknown-agent' },
@@ -406,7 +406,7 @@ describe('CRITICAL: Activity Feed Entry Creation', () => {
     });
 
     it('MUST handle missing agentId', () => {
-      const agents = [{ agentId: 'agent-1', displayName: 'Claude 1' }];
+      const agents = [{ agentId: 'agent-1', displayName: 'Claude Code 1' }];
 
       const entry = createActivityEntry(
         { type: 'read-end', filePath: 'test.ts' },

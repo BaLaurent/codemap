@@ -54,11 +54,16 @@ activityStore.onGraphChange((graphData) => {
 
 // Track thinking state per agent
 const agentStates = new Map<string, AgentThinkingState>();
-let agentCounter = 0;
 const AGENT_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 const MAX_AGENTS = 10; // HARD LIMIT - never allow more than this
 const AGENT_CREATION_COOLDOWN_MS = 500; // Minimum time between new agent registrations
 let lastAgentCreationTime = 0;
+
+// Permission prompt detection - if PreToolUse received but no PostToolUse after this time,
+// agent is likely waiting for user permission. Use a high threshold (60s) to avoid false
+// positives from slow-running tools (npm test, builds, long bash commands, etc.)
+// For immediate detection, AskUserQuestion is handled separately.
+const WAITING_FOR_INPUT_THRESHOLD_MS = 60000;
 
 // Debug/observability tracking
 const SERVER_START_TIME = Date.now();
@@ -73,8 +78,6 @@ function saveAgentState(): void {
     const state = {
       savedAt: Date.now(),
       agents: Array.from(agentStates.values()),
-      agentCounter,
-      agentCounterBySource,
     };
     fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
   } catch (err) {
@@ -95,12 +98,6 @@ function loadAgentState(): void {
         }
       }
 
-      // Restore counters
-      if (data.agentCounter) agentCounter = data.agentCounter;
-      if (data.agentCounterBySource) {
-        Object.assign(agentCounterBySource, data.agentCounterBySource);
-      }
-
       console.log(`[${new Date().toISOString()}] Restored ${agentStates.size} agents from state file`);
     }
   } catch (err) {
@@ -119,8 +116,24 @@ function isValidAgentId(id: string): boolean {
   return uuidRegex.test(id);
 }
 
-// Track agent numbers per source for proper naming
-const agentCounterBySource: Record<string, number> = { claude: 0, cursor: 0, unknown: 0 };
+// Find the next available number for a source (fills gaps from removed agents)
+function getNextAgentNumber(source: 'claude' | 'cursor' | 'unknown'): number {
+  const usedNumbers = new Set<number>();
+  for (const state of agentStates.values()) {
+    if (state.source === source) {
+      const match = state.displayName.match(/(\d+)$/);
+      if (match) {
+        usedNumbers.add(parseInt(match[1], 10));
+      }
+    }
+  }
+  // Find the lowest available number starting from 1
+  let num = 1;
+  while (usedNumbers.has(num)) {
+    num++;
+  }
+  return num;
+}
 
 // Safe agent registration with multiple protections
 function registerAgent(
@@ -156,12 +169,12 @@ function registerAgent(
 
   // All checks passed - create the agent with source-specific name
   lastAgentCreationTime = now;
-  agentCounterBySource[agentSource]++;
+  const agentNumber = getNextAgentNumber(agentSource);
 
-  // Name based on source: "Claude 1", "Cursor 1", etc.
-  const sourceName = agentSource === 'claude' ? 'Claude' :
+  // Name based on source: "Claude Code 1", "Cursor 1", etc.
+  const sourceName = agentSource === 'claude' ? 'Claude Code' :
                      agentSource === 'cursor' ? 'Cursor' : 'Agent';
-  const displayName = `${sourceName} ${agentCounterBySource[agentSource]}`;
+  const displayName = `${sourceName} ${agentNumber}`;
 
   state = {
     agentId,
@@ -194,8 +207,22 @@ setInterval(() => {
 }, 60000); // Check every minute
 
 // Periodic sync broadcast - ensures client stays in sync even if events are missed
+// Also detects agents waiting for permission (stuck in PreToolUse state)
 setInterval(() => {
   if (agentStates.size > 0) {
+    const now = Date.now();
+
+    // Check for agents stuck waiting for permission
+    for (const state of agentStates.values()) {
+      if (state.pendingToolStart && !state.waitingForInput) {
+        const waitTime = now - state.pendingToolStart;
+        if (waitTime > WAITING_FOR_INPUT_THRESHOLD_MS) {
+          state.waitingForInput = true;
+          console.log(`[${new Date().toISOString()}] Agent ${state.displayName} appears to be waiting for permission (${waitTime}ms)`);
+        }
+      }
+    }
+
     wsManager.broadcast('thinking', getAgentStatesArray());
   }
 }, 2000); // Sync every 2 seconds
@@ -306,8 +333,8 @@ app.post('/api/thinking', (req, res) => {
   // Update agent type if provided (persists for agent lifetime)
   if (agentType) {
     state.agentType = agentType;
-    // Update display name to include agent type: "Claude Plan 1" instead of "Claude 1"
-    const sourceName = state.source === 'claude' ? 'Claude' :
+    // Update display name to include agent type: "Claude Code Plan 1" instead of "Claude Code 1"
+    const sourceName = state.source === 'claude' ? 'Claude Code' :
                        state.source === 'cursor' ? 'Cursor' : 'Agent';
     const typeLabel = agentType.charAt(0).toUpperCase() + agentType.slice(1);
     const num = state.displayName.match(/\d+$/)?.[0] || '1';
@@ -331,12 +358,18 @@ app.post('/api/thinking', (req, res) => {
     state.statusTimestamp = undefined;
   }
 
-  // Set waitingForInput for AskUserQuestion tool
-  if (type === 'thinking-end' && toolName === 'AskUserQuestion') {
-    state.waitingForInput = true;
-    console.log(`[${new Date().toISOString()}] Agent ${state.displayName} waiting for user input (AskUserQuestion)`);
+  // Track pending tool execution for permission prompt detection
+  if (type === 'thinking-end') {
+    // PreToolUse - tool is starting, track when it started
+    state.pendingToolStart = now;
+    // Immediately set waitingForInput for AskUserQuestion (user must answer)
+    if (toolName === 'AskUserQuestion') {
+      state.waitingForInput = true;
+      console.log(`[${new Date().toISOString()}] Agent ${state.displayName} waiting for user input (AskUserQuestion)`);
+    }
   } else if (type === 'thinking-start') {
-    // Tool completed - clear waiting state
+    // PostToolUse - tool completed, clear pending state
+    state.pendingToolStart = undefined;
     state.waitingForInput = false;
   }
 

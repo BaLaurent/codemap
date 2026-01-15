@@ -298,7 +298,7 @@ describe('INTEGRATION: Debug Endpoint Data', () => {
   it('formats debug data correctly', () => {
     const startTime = Date.now() - 60000; // 1 minute ago
     const agents = new Map([
-      ['agent1', { displayName: 'Claude 1', lastActivity: Date.now() - 5000 }],
+      ['agent1', { displayName: 'Claude Code 1', lastActivity: Date.now() - 5000 }],
     ]);
     const activity = [
       { type: 'read-start', filePath: 'client/src/App.tsx', timestamp: Date.now() },
@@ -309,7 +309,7 @@ describe('INTEGRATION: Debug Endpoint Data', () => {
     expect(debug.server.uptime).toBeGreaterThanOrEqual(60);
     expect(debug.server.wsClients).toBe(2);
     expect(debug.agentCount).toBe(1);
-    expect(debug.agents[0].displayName).toBe('Claude 1');
+    expect(debug.agents[0].displayName).toBe('Claude Code 1');
     expect(debug.recentActivity.length).toBe(1);
   });
 });
