@@ -42,6 +42,7 @@ That's it! The hotel opens automatically and your agent appears. ✨
 - 🟢 **Green glow** = writing code
 - 💭 **Thinking indicator** when agent is processing
 - 🚶 **Walking animations** as agents move between rooms
+- 🦘 **Bouncing** when agent needs your input or permission
 - ☕ **Coffee shop** where idle agents hang out
 
 ---
