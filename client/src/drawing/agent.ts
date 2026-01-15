@@ -2,42 +2,8 @@
 import { AgentCharacter } from './types';
 import { CHARACTER_PALETTES, SKIN, OUTLINE } from './palette';
 
-// Draw a pixel-art santa hat
-const drawSantaHat = (ctx: CanvasRenderingContext2D, headTop: number, frame: number) => {
-  const hatY = headTop - 8;
-
-  // Hat base (red)
-  ctx.fillStyle = '#CC2020';
-  ctx.fillRect(-7, hatY + 4, 14, 6);
-  ctx.fillRect(-6, hatY + 2, 12, 3);
-  ctx.fillRect(-4, hatY, 8, 3);
-  ctx.fillRect(-2, hatY - 2, 4, 3);
-
-  // Hat darker shade
-  ctx.fillStyle = '#A01818';
-  ctx.fillRect(4, hatY + 3, 3, 5);
-  ctx.fillRect(2, hatY + 1, 2, 3);
-
-  // White trim at bottom
-  ctx.fillStyle = '#FFFFFF';
-  ctx.fillRect(-8, hatY + 9, 16, 3);
-  ctx.fillStyle = '#E8E8E8';
-  ctx.fillRect(-8, hatY + 11, 16, 1);
-
-  // Pom-pom with subtle bounce
-  const bounce = Math.sin(frame * 0.08) * 1;
-  ctx.fillStyle = '#FFFFFF';
-  ctx.beginPath();
-  ctx.arc(0, hatY - 4 + bounce, 3, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = '#E0E0E0';
-  ctx.beginPath();
-  ctx.arc(1, hatY - 3 + bounce, 1, 0, Math.PI * 2);
-  ctx.fill();
-};
-
 // Draw a single agent character with animations
-export const drawAgentCharacter = (ctx: CanvasRenderingContext2D, char: AgentCharacter, christmas: boolean = false) => {
+export const drawAgentCharacter = (ctx: CanvasRenderingContext2D, char: AgentCharacter) => {
   const cx = char.x;
   const jumpOffset = char.waitingForInput ? Math.abs(Math.sin(char.frame * 0.15)) * 8 : 0;
   const cy = char.y - jumpOffset;
@@ -111,10 +77,9 @@ export const drawAgentCharacter = (ctx: CanvasRenderingContext2D, char: AgentCha
 
   // Head - hair
   const hairStyle = char.colorIndex % 5;
-  // White hair for Santa look in christmas mode
-  const hairDark = christmas ? '#E8E8E8' : palette.hair.dark;
-  const hairMid = christmas ? '#F0F0F0' : palette.hair.mid;
-  const hairLight = christmas ? '#FFFFFF' : palette.hair.light;
+  const hairDark = palette.hair.dark;
+  const hairMid = palette.hair.mid;
+  const hairLight = palette.hair.light;
   ctx.fillStyle = hairDark;
 
   if (hairStyle === 0) {
@@ -182,32 +147,11 @@ export const drawAgentCharacter = (ctx: CanvasRenderingContext2D, char: AgentCha
   ctx.fillStyle = SKIN.shadow;
   ctx.fillRect(-1, headTop + 13, 2, 1);
 
-  // Santa beard (when christmas mode enabled, drawn before outline)
-  if (christmas) {
-    // White fluffy beard
-    ctx.fillStyle = '#FFFFFF';
-    ctx.fillRect(-5, headTop + 12, 10, 4); // Main beard
-    ctx.fillRect(-4, headTop + 16, 8, 2);  // Lower beard
-    ctx.fillRect(-3, headTop + 18, 6, 2);  // Beard tip
-    ctx.fillRect(-2, headTop + 20, 4, 1);  // Final point
-    // Shadow for depth
-    ctx.fillStyle = '#E0E0E0';
-    ctx.fillRect(2, headTop + 13, 3, 3);
-    ctx.fillRect(1, headTop + 16, 3, 2);
-  }
-
   // Outline
   ctx.fillStyle = OUTLINE;
   ctx.fillRect(-6, headTop + 5, 1, 10);
   ctx.fillRect(5, headTop + 5, 1, 10);
-  if (!christmas) {
-    ctx.fillRect(-5, headTop + 15, 10, 1);
-  }
-
-  // Santa hat (when christmas mode enabled)
-  if (christmas) {
-    drawSantaHat(ctx, headTop, char.frame);
-  }
+  ctx.fillRect(-5, headTop + 15, 10, 1);
 
   ctx.restore();
 
@@ -218,6 +162,53 @@ export const drawAgentCharacter = (ctx: CanvasRenderingContext2D, char: AgentCha
   ctx.fillText(char.displayName, cx + 1, cy - 50);
   ctx.fillStyle = '#FFFFFF';
   ctx.fillText(char.displayName, cx, cy - 51);
+
+  // Model label (below name, smaller, gray)
+  if (char.model) {
+    // Abbreviate model name: "claude-3.5-sonnet" → "3.5-sonnet"
+    let modelShort = char.model;
+    if (modelShort.startsWith('claude-')) {
+      modelShort = modelShort.replace('claude-', '');
+    } else if (modelShort.startsWith('gpt-')) {
+      modelShort = modelShort.replace('gpt-', 'gpt');
+    }
+    // Truncate if too long
+    if (modelShort.length > 15) {
+      modelShort = modelShort.slice(0, 12) + '...';
+    }
+    ctx.font = '8px monospace';
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    ctx.fillText(modelShort, cx + 1, cy - 41);
+    ctx.fillStyle = '#AAAAAA';
+    ctx.fillText(modelShort, cx, cy - 42);
+  }
+
+  // Status badge (completion indicator)
+  if (char.status) {
+    const statusConfig = {
+      completed: { icon: '✓', bg: '#4CAF50', fg: '#FFFFFF' },
+      aborted: { icon: '!', bg: '#FF9800', fg: '#FFFFFF' },
+      error: { icon: '✗', bg: '#F44336', fg: '#FFFFFF' }
+    };
+    const config = statusConfig[char.status];
+    const badgeX = cx + 20;
+    const badgeY = cy - 55;
+
+    // Badge background
+    ctx.beginPath();
+    ctx.arc(badgeX, badgeY, 8, 0, Math.PI * 2);
+    ctx.fillStyle = config.bg;
+    ctx.fill();
+    ctx.strokeStyle = '#FFFFFF';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Badge icon
+    ctx.font = 'bold 10px sans-serif';
+    ctx.fillStyle = config.fg;
+    ctx.textAlign = 'center';
+    ctx.fillText(config.icon, badgeX, badgeY + 3);
+  }
 
   // ZZZ animation when idle
   if (char.isIdle) {
@@ -250,8 +241,18 @@ export const drawAgentCharacter = (ctx: CanvasRenderingContext2D, char: AgentCha
     const textColor = isStuck ? '#604000' : '#333333';
     const secondaryColor = '#666666';
 
-    // Primary text (tool name or stuck message)
-    const primaryText = isStuck ? "Hey! I'm stuck!" : char.currentCommand!;
+    // Format duration if available
+    let durationStr = '';
+    if (!isStuck && char.lastDuration !== undefined) {
+      if (char.lastDuration < 1000) {
+        durationStr = ` (${char.lastDuration}ms)`;
+      } else {
+        durationStr = ` (${(char.lastDuration / 1000).toFixed(1)}s)`;
+      }
+    }
+
+    // Primary text (tool name or stuck message) with optional duration
+    const primaryText = isStuck ? "Hey! I'm stuck!" : char.currentCommand! + durationStr;
     // Secondary text (tool input - file, command, pattern)
     const secondaryText = !isStuck && char.toolInput ? char.toolInput : null;
 

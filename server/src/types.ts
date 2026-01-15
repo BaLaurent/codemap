@@ -24,14 +24,21 @@ export interface FileActivityEvent {
   timestamp: number;
 }
 
+/** Agent status from stop events */
+export type AgentStatus = 'completed' | 'aborted' | 'error';
+
 export interface ThinkingEvent {
-  type: 'thinking-start' | 'thinking-end';
+  type: 'thinking-start' | 'thinking-end' | 'agent-stop';
   agentId: string;
   source?: AgentSource;  // Which tool (claude/cursor)
   timestamp: number;
   toolName?: string;  // Current tool being used (e.g., "Read", "Edit", "Bash")
   toolInput?: string;  // Abbreviated tool input (file path, command, pattern)
   agentType?: string;  // Agent type from SessionStart (e.g., "Plan", "Explore", "Bash")
+  model?: string;  // Model name (e.g., "claude-3.5-sonnet") - Cursor provides this
+  duration?: number;  // Operation duration in ms - from afterShellExecution/afterMCPExecution
+  status?: AgentStatus;  // Agent completion status - from stop hook
+  loopCount?: number;  // Number of agent loops - from stop hook
 }
 
 export interface AgentThinkingState {
@@ -45,6 +52,10 @@ export interface AgentThinkingState {
   waitingForInput?: boolean;  // True when agent is waiting for user input
   pendingToolStart?: number;  // Timestamp when tool started (for detecting stuck permission prompts)
   agentType?: string;  // Agent type (e.g., "Plan", "Explore", "Bash") - shown in display name
+  model?: string;  // Model name (e.g., "claude-3.5-sonnet") - shown below agent name
+  lastDuration?: number;  // Last operation duration in ms
+  status?: AgentStatus;  // Completion status (completed/aborted/error)
+  statusTimestamp?: number;  // When status was set (for auto-clearing)
 }
 
 export interface GraphNode {
