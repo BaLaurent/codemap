@@ -24,6 +24,7 @@ That's it! The hotel opens automatically and your agent appears. ✨
 | 🏢 **Smart Layout** | Folders become rooms, files become desks, arranged by git activity |
 | 👥 **Multi-Agent** | See up to 10 agents working simultaneously |
 | 💬 **Speech Bubbles** | See what tool and file each agent is working on |
+| 🦘 **Stuck Detection** | Agents bounce when waiting for input — never waste time on a stuck agent |
 | 🎨 **Themed Rooms** | Components (blue), Server (green), Tests (peach), and more |
 | ⚡ **Real-time Updates** | Instant feedback as agents read, write, and think |
 | 🔄 **Dynamic Refresh** | Hotel reorganizes on each git commit |
