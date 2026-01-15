@@ -1,137 +1,151 @@
-# CodeMap Hotel
+# 🏨 CodeMap Hotel
 
-Real-time pixel-art visualization of AI coding agents (Claude Code & Cursor).
+**Watch your AI coding agents come to life!** See Claude Code and Cursor as pixel-art characters moving through a hotel, working at desks, reading files, and writing code in real-time.
 
 ![CodeMap Hotel Demo](docs/demo.gif)
 
----
+## ⚡ One Command Setup
 
-## Quick Start
-
-### Use in Any Project (give this to your agent)
+Paste this into Claude Code or Cursor in any project:
 
 ```bash
 npx github:JamsusMaximus/codemap
 ```
 
-This single command installs CodeMap, configures hooks, starts the server, and opens the visualization. Run it from any project directory and watch your AI agent appear in the hotel!
+That's it! The hotel opens automatically and your agent appears. ✨
 
-### Develop CodeMap Itself
+---
+
+## ✨ Features
+
+| Feature | Description |
+|---------|-------------|
+| 🎮 **Live Visualization** | Watch agents move between rooms as they work on your code |
+| 🏢 **Smart Layout** | Folders become rooms, files become desks, arranged by git activity |
+| 👥 **Multi-Agent** | See up to 10 agents working simultaneously |
+| 💬 **Speech Bubbles** | See what tool and file each agent is working on |
+| 🎨 **Themed Rooms** | Components (blue), Server (green), Tests (peach), and more |
+| ⚡ **Real-time Updates** | Instant feedback as agents read, write, and think |
+| 🔄 **Dynamic Refresh** | Hotel reorganizes on each git commit |
+
+### 🤖 Works With
+
+- ✅ **Claude Code** — Full support, automatic hook configuration
+- ✅ **Cursor** — Enhanced features: model name, completion badges, operation timing
+
+---
+
+## 🎯 What You'll See
+
+- 💻 **Computer screens** light up when files are accessed
+- 🟡 **Yellow glow** = reading a file
+- 🟢 **Green glow** = writing code
+- 💭 **Thinking indicator** when agent is processing
+- 🚶 **Walking animations** as agents move between rooms
+- ☕ **Coffee shop** where idle agents hang out
+
+---
+
+## 🛠 Alternative Setup
+
+### Clone and Run Locally
 
 ```bash
-git clone https://github.com/JamsusMaximus/codemap && cd codemap && npm install && npm run dev
+git clone https://github.com/JamsusMaximus/codemap
+cd codemap
+npm install
+npm run dev
 ```
 
 Then open http://localhost:5173/hotel
 
----
+### Setup Hooks Only (no server start)
 
-## How It Works
-
-```
-AI Agent        →  Hook Scripts  →  Server (:5174)  →  Client (:5173)
-(Claude/Cursor)       │                │                   │
-  triggers          capture          tracks &           renders
-  hooks            events           broadcasts         pixel-art
+```bash
+npx github:JamsusMaximus/codemap setup
 ```
 
-When your AI agent reads files, writes code, or runs commands, CodeMap visualizes it as a character moving around a hotel. Each folder becomes a room, each file becomes a desk.
+---
+
+## 📖 How It Works
+
+```
+🤖 AI Agent      →  📡 Hooks      →  🖥 Server      →  🎨 Browser
+(Claude/Cursor)     (capture)       (broadcast)       (render)
+```
+
+1. Your AI agent reads/writes files or runs commands
+2. Hook scripts capture these events
+3. Server tracks activity and broadcasts via WebSocket
+4. Browser renders the pixel-art hotel in real-time
 
 ---
 
-## Features
+## 🔧 Technical Details
 
-### Hotel View
+<details>
+<summary>Server API (Port 5174)</summary>
 
-- **Multi-floor Layout**: Rooms arranged by git activity (hottest folders on ground floor)
-- **Dynamic Layout**: Hotel reorganizes when you make git commits
-- **Room Themes**: Different colors based on folder type:
-  - Blue: Components, UI, Views
-  - Green: Server, API, Routes
-  - Lavender: Hooks, Utils, Lib
-  - Peach: Tests, Specs
-- **Activity Indicators**:
-  - Computer screens show current file being read/written
-  - Yellow glow = reading, Green glow = writing
-- **Multi-agent Support**: See up to 10 agents working simultaneously
-- **Agent States**:
-  - Thinking indicator above agent
-  - Name tags and walking animations
-  - Speech bubbles showing current tool and file
-- **Cursor-Specific Features**:
-  - Model name displayed below agent (e.g., "3.5-sonnet")
-  - Completion badges: green (completed), orange (aborted), red (error)
-  - Operation duration in speech bubble (e.g., "Bash (2.3s)")
+- `POST /api/activity` — File read/write events
+- `POST /api/thinking` — Agent thinking state
+- `GET /api/graph` — File tree data
+- `GET /api/hot-folders` — Git-ranked folders
+- WebSocket at `/ws` for real-time updates
 
-### Navigation
+</details>
 
-- **Zoom**: Scroll wheel or `Cmd/Ctrl +/-`
-- **Pan**: Click and drag, or arrow keys
+<details>
+<summary>Client Routes (Port 5173)</summary>
 
-### Compatibility
+- `/hotel` — Pixel-art hotel visualization
+- `/` — Force-directed graph view
 
-- **Claude Code**: Full support via `.claude/settings.local.json`
-- **Cursor**: Full support via `.cursor/hooks.json` with enhanced features
+</details>
 
----
+<details>
+<summary>Hook Scripts</summary>
 
-## Architecture
+- `file-activity-hook.sh` — Captures file operations
+- `thinking-hook.sh` — Captures agent state, model, duration
+- `cursor-stop-hook.sh` — Captures Cursor completion status
+- `git-post-commit.sh` — Triggers layout refresh
 
-### Server (`server/` - Port 5174)
+</details>
 
-- `POST /api/activity` - File read/write events
-- `POST /api/thinking` - Agent thinking state
-- `GET /api/graph` - File tree data
-- `GET /api/hot-folders` - Git-ranked folders
-- WebSocket broadcasts real-time updates
+<details>
+<summary>Troubleshooting</summary>
 
-### Client (`client/` - Port 5173)
-
-- `/` - Tree view (force-directed graph)
-- `/hotel` - Hotel view (pixel-art visualization)
-
-### Hooks (`hooks/`)
-
-- `file-activity-hook.sh` - File operations
-- `thinking-hook.sh` - Agent state, model, duration
-- `cursor-stop-hook.sh` - Cursor completion status
-- `git-post-commit.sh` - Layout refresh on commits
-
----
-
-## Troubleshooting
-
-### Server Not Starting
-
+**Server not starting?**
 ```bash
 lsof -i :5174  # Check if port in use
 curl http://localhost:5174/api/health
 ```
 
-### Hooks Not Firing
-
+**Hooks not firing?**
 ```bash
 tail -f /tmp/codemap-hook.log
 ```
 
-### No Agents Appearing
-
+**No agents appearing?**
 ```bash
 curl http://localhost:5174/api/thinking | jq
 ```
 
----
+</details>
 
-## Development
+<details>
+<summary>Development</summary>
 
 ```bash
 npm install
-npm run dev           # Start both server and client
-npm test --workspaces # Run all tests
+npm run dev           # Start server + client
+npm test --workspaces # Run all 248 tests
 ```
+
+</details>
 
 ---
 
-## License
+## 📄 License
 
-MIT
+MIT — Built with ❤️ for the AI coding community
