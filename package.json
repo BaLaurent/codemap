@@ -20,7 +20,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/your-username/codemap-hotel"
+    "url": "https://github.com/JamsusMaximus/codemap"
   },
   "devDependencies": {
     "concurrently": "^8.2.0"
