@@ -15,16 +15,13 @@ const FLOOR_CONFIG = [
   { rooms: 4, filesPerRoom: 1, roomWidth: 11, roomHeight: 8 },   // Floor 2 - 4 small rooms
   { rooms: 2, filesPerRoom: 1, roomWidth: 23, roomHeight: 8 },   // Floor 3 (top) - 2 small rooms (fill width)
 ];
-const MAX_FLOORS = FLOOR_CONFIG.length;
-const FLOOR_GAP = 1;
+import { buildFloorsByDepth, FloorModel } from '../layout/floor-by-depth';
 import {
   TILE_SIZE,
   RoomLayout,
-  FileLayout,
   AgentCharacter,
   ScreenFlash,
   seededRandom,
-  getFloorStyle,
   drawFloor,
   drawWalls,
   drawWindows,
@@ -71,6 +68,7 @@ export function HabboRoom() {
   const lastThinkingVersionRef = useRef(0);
   const lastLayoutVersionRef = useRef(0);
   const hotFoldersRef = useRef<FolderScore[]>([]);
+  const floorsRef = useRef<FloorModel[]>([]);
   const prevAgentCommandsRef = useRef<Map<string, string | undefined>>(new Map());
 
   // Agent trails - stores recent footprint positions
@@ -99,140 +97,57 @@ export function HabboRoom() {
   const trackingZoom = 3; // Zoom level when tracking
   const baseOffsetsRef = useRef({ x: 0, y: 0 }); // Store base offsets for coordinate conversion
 
-  // Build multi-floor layout from hot folders (pyramid structure)
+  // Build floors by folder depth. Returns a single RoomLayout wrapping the
+  // rooms of ALL floors (gating to one floor happens in a later task).
   const buildLayout = (nodes: GraphNode[]): RoomLayout | null => {
-    const hotFolders = hotFoldersRef.current;
-    if (hotFolders.length === 0 && nodes.length === 0) return null;
+    const floors = buildFloorsByDepth(nodes, hotFoldersRef.current);
+    floorsRef.current = floors;
+    if (floors.length === 0) return null;
 
     const root = nodes.find(n => n.depth === -1);
     const rootName = root?.name || 'Project';
 
-    // Calculate total rooms needed
-    const totalRooms = FLOOR_CONFIG.reduce((sum, cfg) => sum + cfg.rooms, 0);
-    const foldersToShow = hotFolders.length > 0
-      ? hotFolders.slice(0, totalRooms)
-      : nodes.filter(n => n.isFolder && n.depth === 0).slice(0, totalRooms);
+    filePositionsRef.current.clear();
+    const children: RoomLayout[] = [];
+    let stackY = 1;
+    let maxWidth = 1;
 
-    const roomChildren: RoomLayout[] = [];
-    let folderIndex = 0;
-
-    // Calculate max width (widest floor)
-    const maxFloorWidth = Math.max(...FLOOR_CONFIG.map(cfg => cfg.rooms * (cfg.roomWidth + 1) - 1));
-
-    // Calculate floor Y positions (bottom to top)
-    const floorYPositions: number[] = [];
-    let currentY = 1;
-    for (let f = MAX_FLOORS - 1; f >= 0; f--) {
-      floorYPositions[f] = currentY;
-      currentY += FLOOR_CONFIG[f].roomHeight + FLOOR_GAP;
-    }
-
-    // Create rooms for each floor
-    for (let floorNum = 0; floorNum < MAX_FLOORS && folderIndex < foldersToShow.length; floorNum++) {
-      const config = FLOOR_CONFIG[floorNum];
-      const floorWidth = config.rooms * (config.roomWidth + 1) - 1;
-      const floorStartX = 1 + Math.floor((maxFloorWidth - floorWidth) / 2); // Center the floor
-
-      for (let roomInFloor = 0; roomInFloor < config.rooms && folderIndex < foldersToShow.length; roomInFloor++) {
-        const folder = foldersToShow[folderIndex];
-        folderIndex++;
-
-        const roomX = floorStartX + roomInFloor * (config.roomWidth + 1);
-        const roomY = floorYPositions[floorNum];
-
-        const folderName = 'folder' in folder
-          ? (folder as FolderScore).folder.split('/').pop() || (folder as FolderScore).folder
-          : (folder as GraphNode).name;
-        const folderId = 'folder' in folder ? (folder as FolderScore).folder : (folder as GraphNode).id;
-
-        const floorStyle = getFloorStyle(folderName, floorNum);
-        const recentFiles = 'recentFiles' in folder ? (folder as FolderScore).recentFiles : [];
-        const score = 'score' in folder ? (folder as FolderScore).score : 0;
-
-        // Create file layouts (multiple desks per room based on config)
-        const fileLayouts: FileLayout[] = [];
-        const filesToShow = Math.min(config.filesPerRoom, recentFiles.length || 1);
-        // Allow up to 4 columns for wider rooms (roomWidth >= 20), otherwise 2
-        const maxCols = config.roomWidth >= 20 ? 4 : 2;
-        const fileCols = Math.min(maxCols, filesToShow);
-
-        for (let fileIdx = 0; fileIdx < filesToShow; fileIdx++) {
-          const col = fileIdx % fileCols;
-          const row = Math.floor(fileIdx / fileCols);
-          const deskX = roomX + 2 + col * 5;
-          const deskY = roomY + 3 + row * 4;
-
-          const fileName = recentFiles[fileIdx] || folderName;
-          const fileId = `${folderId}/${fileName}`;
-
-          // Register position for agent movement
-          filePositionsRef.current.set(fileId, {
-            x: deskX * TILE_SIZE + TILE_SIZE * 1.5,
-            y: deskY * TILE_SIZE + TILE_SIZE
-          });
-
-          fileLayouts.push({
-            x: deskX,
-            y: deskY,
-            name: fileName,
-            id: fileId,
-            isActive: false,
-            isWriting: false,
-            deskStyle: Math.floor(seededRandom(deskX * 53 + deskY * 97 + fileIdx * 13) * 3),
-            heatLevel: Math.min(1, score / 20)
-          });
-        }
-
-        // Also register the folder itself for agent routing
-        const centerDeskX = roomX + Math.floor(config.roomWidth / 2) - 2;
-        const centerDeskY = roomY + Math.floor(config.roomHeight / 2);
-        filePositionsRef.current.set(folderId, {
-          x: centerDeskX * TILE_SIZE + TILE_SIZE * 1.5,
-          y: centerDeskY * TILE_SIZE + TILE_SIZE
-        });
-
-        roomChildren.push({
-          x: roomX,
-          y: roomY,
-          width: config.roomWidth,
-          height: config.roomHeight,
-          name: folderName,
-          files: fileLayouts,
-          children: [],
-          depth: floorNum,
-          floorStyle
-        });
+    for (const fm of floors) {
+      for (const [id, pos] of fm.filePositions) {
+        filePositionsRef.current.set(id, { x: pos.x, y: pos.y + stackY * TILE_SIZE });
       }
+      let floorBottom = 0;
+      for (const room of fm.rooms) {
+        children.push({ ...room, y: room.y + stackY });
+        floorBottom = Math.max(floorBottom, room.y + room.height);
+        maxWidth = Math.max(maxWidth, room.x + room.width);
+      }
+      stackY += floorBottom + 2;
     }
-
-    // Add lobby at the bottom
-    const lobbyY = currentY;
-    const lobbyRoom: RoomLayout = {
-      x: 1,
-      y: lobbyY,
-      width: maxFloorWidth,
-      height: 8,
-      name: 'Lobby',
-      files: [],
-      children: [],
-      depth: 0,
-      floorStyle: 'wood'
-    };
-    roomChildren.push(lobbyRoom);
-
-    const totalHeight = lobbyY + 8;
 
     return {
       x: 1,
       y: 1,
-      width: maxFloorWidth,
-      height: totalHeight,
+      width: maxWidth + 1,
+      height: stackY,
       name: rootName,
       files: [],
-      children: roomChildren,
+      children,
       depth: -1,
-      floorStyle: 'wood'
+      floorStyle: 'wood',
     };
+  };
+
+  // Center of the first room of the layout, in pixels; falls back to layout center.
+  const layoutSpawnPoint = (layout: RoomLayout): { x: number; y: number } => {
+    const first = layout.children[0];
+    if (first) {
+      return {
+        x: (first.x + first.width / 2) * TILE_SIZE,
+        y: (first.y + first.height / 2) * TILE_SIZE,
+      };
+    }
+    return { x: (layout.x + layout.width / 2) * TILE_SIZE, y: (layout.y + layout.height / 2) * TILE_SIZE };
   };
 
   // Draw wall art/posters based on room type
@@ -515,8 +430,9 @@ export function HabboRoom() {
 
             if (!spawnedAtFile) {
               if (layout) {
-                baseX = (layout.x + layout.width / 2 - 2 + (index % 4) * 2) * TILE_SIZE;
-                baseY = (layout.y + layout.height - 4 - Math.floor(index / 4) * 2) * TILE_SIZE;
+                const spawn = layoutSpawnPoint(layout);
+                baseX = spawn.x + ((index % 4) * 2 - 2) * TILE_SIZE;
+                baseY = spawn.y + (-Math.floor(index / 4) * 2) * TILE_SIZE;
               } else {
                 baseX = 300 + (index % 4) * 50;
                 baseY = 400 + Math.floor(index / 4) * 50;
@@ -872,8 +788,9 @@ export function HabboRoom() {
         if (agentCharactersRef.current.size > 0) {
           let index = 0;
           for (const [, char] of agentCharactersRef.current) {
-            const lobbyX = (layout.x + layout.width / 2 - 2 + (index % 4) * 2) * TILE_SIZE;
-            const lobbyY = (layout.y + layout.height - 4 - Math.floor(index / 4) * 2) * TILE_SIZE;
+            const spawn = layoutSpawnPoint(layout);
+            const lobbyX = spawn.x + ((index % 4) * 2 - 2) * TILE_SIZE;
+            const lobbyY = spawn.y + (-Math.floor(index / 4) * 2) * TILE_SIZE;
 
             // Check if agent has never been positioned (new agent or first layout)
             const isUninitialized = char.x === 0 && char.y === 0 && !char.isMoving;
