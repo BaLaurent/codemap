@@ -13,7 +13,7 @@ const ROOM_HEIGHT = 9;   // tiles
 const ROOM_GAP = 1;      // tiles between rooms
 const ROOMS_PER_ROW = 6; // wrap after this many rooms
 const ROW_GAP = 1;       // tiles between wrapped rows
-const MAX_FILES_PER_ROOM = 4;
+const MAX_FILES_PER_ROOM = 12;
 const HEAT_DIVISOR = 20;
 
 export interface FloorModel {
@@ -56,13 +56,23 @@ export function buildFloorsByDepth(
     return absId.startsWith(rootId + '/') ? absId.slice(rootId.length + 1) : absId;
   };
 
-  // Build score/recent maps keyed by project-relative folder path
+  // Build score map keyed by project-relative folder path
   // (matching hotFolders.folder which is already project-relative).
   const scoreOf = new Map<string, number>();
-  const recentOf = new Map<string, string[]>();
   for (const h of hotFolders) {
     scoreOf.set(h.folder, h.score);
-    recentOf.set(h.folder, h.recentFiles);
+  }
+
+  // Build filesByParentRel: map from project-relative parent folder path → file nodes.
+  // File nodes have !isFolder and depth >= 0 (exclude root).
+  const filesByParentRel = new Map<string, GraphNode[]>();
+  for (const n of nodes) {
+    if (n.isFolder || n.depth < 0) continue;
+    const relFile = toRel(n.id);
+    const lastSlash = relFile.lastIndexOf('/');
+    const parentRel = lastSlash === -1 ? '' : relFile.slice(0, lastSlash);
+    if (!filesByParentRel.has(parentRel)) filesByParentRel.set(parentRel, []);
+    filesByParentRel.get(parentRel)!.push(n);
   }
 
   // Group folder nodes by their server-emitted depth (which IS the correct
@@ -86,43 +96,59 @@ export function buildFloorsByDepth(
       return d !== 0 ? d : a.id.localeCompare(b.id);
     });
 
+    // Filter to only folders that have at least one direct file node.
+    const nonEmptyFolders = folderNodes.filter(node => {
+      const relPath = toRel(node.id);
+      const directFiles = filesByParentRel.get(relPath);
+      return directFiles !== undefined && directFiles.length > 0;
+    });
+
+    // If no folder on this floor has direct files, omit the entire floor.
+    if (nonEmptyFolders.length === 0) continue;
+
     const rooms: RoomLayout[] = [];
     const filePositions = new Map<string, { x: number; y: number }>();
 
-    folderNodes.forEach((node, idx) => {
+    nonEmptyFolders.forEach((node, idx) => {
       const relPath = toRel(node.id);
 
       const col = idx % ROOMS_PER_ROW;
       const row = Math.floor(idx / ROOMS_PER_ROW);
       const roomX = 1 + col * (ROOM_WIDTH + ROOM_GAP);
       const roomY = 1 + row * (ROOM_HEIGHT + ROW_GAP);
-      const score = scoreOf.get(relPath) ?? 0;
-      // recentFiles are bare BASENAMES (path.basename) as emitted by git-activity.ts.
-      const recent = recentOf.get(relPath) ?? [];
       const floorStyle: FloorStyle = getFloorStyle(node.name, floor);
 
-      const files: FileLayout[] = [];
-      const filesToShow = Math.min(MAX_FILES_PER_ROOM, recent.length);
+      // Get direct file nodes for this folder, sort and cap.
+      const directFiles = (filesByParentRel.get(relPath) ?? []).slice().sort((a, b) => {
+        const actA = a.activityCount.reads + a.activityCount.writes + a.activityCount.searches;
+        const actB = b.activityCount.reads + b.activityCount.writes + b.activityCount.searches;
+        const d = actB - actA;
+        return d !== 0 ? d : a.name.localeCompare(b.name);
+      });
+
+      const filesToShow = Math.min(MAX_FILES_PER_ROOM, directFiles.length);
       const cols = Math.max(1, Math.min(2, filesToShow));
+
+      const files: FileLayout[] = [];
       for (let i = 0; i < filesToShow; i++) {
+        const fileNode = directFiles[i];
         const c = i % cols;
         const r = Math.floor(i / cols);
         const deskX = roomX + 2 + c * 5;
         const deskY = roomY + 3 + r * 4;
-        // Basename from git-activity; join with relPath to get the full relative file path.
-        const basename = recent[i];
-        const fileKey = relPath === '' ? basename : `${relPath}/${basename}`;
+        const fileKey = relPath === '' ? fileNode.name : `${relPath}/${fileNode.name}`;
+        const activity = fileNode.activityCount.reads + fileNode.activityCount.writes + fileNode.activityCount.searches;
         filePositions.set(fileKey, {
           x: deskX * TILE_SIZE + TILE_SIZE * 1.5,
           y: deskY * TILE_SIZE + TILE_SIZE,
         });
         files.push({
           x: deskX, y: deskY,
-          name: basename,
+          name: fileNode.name,
           id: fileKey,
           isActive: false, isWriting: false,
           deskStyle: Math.floor(seededRandom(deskX * 53 + deskY * 97 + i * 13) * 3),
-          heatLevel: Math.min(1, score / HEAT_DIVISOR),
+          heatLevel: Math.min(1, activity / HEAT_DIVISOR),
         });
       }
 
