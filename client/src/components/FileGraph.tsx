@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useFileActivity } from '../hooks/useFileActivity';
 import { GraphNode } from '../types';
-import { calculateTreeLayout, LayoutNode } from '../layout/tree-layout';
+import { calculateTreeLayout, pruneToActive, LayoutNode } from '../layout/tree-layout';
 
 const READ_COLOR = '#3b82f6';   // Blue
 const WRITE_COLOR = '#f59e0b';  // Amber
@@ -29,6 +29,11 @@ export function FileGraph() {
   const layoutNodesRef = useRef<LayoutNode[]>([]);
   const lastActivityVersionRef = useRef(0);
   const lastNodeCountRef = useRef(0);
+  // Separate from lastActivityVersionRef (which gates the fading handler).
+  // Tracks the activity version at the time of the last layout recompute so
+  // that new file activity triggers a mini-map rebuild even when node count
+  // hasn't changed (e.g. activityCount increments on existing nodes).
+  const lastLayoutActivityVersionRef = useRef(0);
   const collapsedFoldersRef = useRef<Set<string>>(new Set());
   const userZoomRef = useRef(1);
   const panRef = useRef({ x: 0, y: 0 });
@@ -120,11 +125,20 @@ export function FileGraph() {
       const currentGraphData = graphDataRef.current;
       const nodeCount = currentGraphData.nodes.length;
 
-      // Only recalculate layout when node count changes
-      if (nodeCount !== lastNodeCountRef.current || layoutDirtyRef.current) {
+      // Recalculate layout when node count changes, activity changes, or layout
+      // is marked dirty (e.g. folder collapse). Activity version is tracked
+      // separately from lastActivityVersionRef which gates the fading handler.
+      const currentActivityVersion = activityVersionRef.current;
+      if (
+        nodeCount !== lastNodeCountRef.current ||
+        currentActivityVersion !== lastLayoutActivityVersionRef.current ||
+        layoutDirtyRef.current
+      ) {
         lastNodeCountRef.current = nodeCount;
+        lastLayoutActivityVersionRef.current = currentActivityVersion;
         layoutDirtyRef.current = false;
-        layoutNodesRef.current = calculateTreeLayout(currentGraphData.nodes, collapsedFoldersRef.current);
+        const activeNodes = pruneToActive(currentGraphData.nodes);
+        layoutNodesRef.current = calculateTreeLayout(activeNodes, collapsedFoldersRef.current);
       }
       const layoutNodes = layoutNodesRef.current;
 
