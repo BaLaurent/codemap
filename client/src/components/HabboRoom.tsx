@@ -1182,7 +1182,7 @@ export function HabboRoom() {
       </div>
       <FloorNavBar
         currentFloor={nav.state.currentFloorIndex}
-        maxFloor={floorsRef.current.length ? Math.max(...floorsRef.current.map(f => f.floor)) : 0}
+        availableFloors={[...new Set(floorsRef.current.map(f => f.floor))].sort((a, b) => a - b)}
         follow={nav.state.follow}
         focusAgentId={nav.state.focusAgentId}
         focusAgentName={

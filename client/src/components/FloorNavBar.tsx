@@ -3,7 +3,7 @@ import type { CSSProperties } from 'react';
 
 interface FloorNavBarProps {
   currentFloor: number;
-  maxFloor: number;
+  availableFloors: number[];
   follow: boolean;
   focusAgentId: string | null;
   focusAgentName?: string;
@@ -34,9 +34,13 @@ const floorBtn = (disabled: boolean): CSSProperties => ({
 });
 
 export function FloorNavBar({
-  currentFloor, maxFloor, follow, focusAgentId, focusAgentName, agentsElsewhere,
+  currentFloor, availableFloors, follow, focusAgentId, focusAgentName, agentsElsewhere,
   onCycleAgent, onSelectFloor, onSelectAgent,
 }: FloorNavBarProps) {
+  // Step only among floors that actually exist (availableFloors, sorted ascending).
+  const prevFloor = availableFloors.filter(f => f < currentFloor).at(-1);
+  const nextFloor = availableFloors.find(f => f > currentFloor);
+
   return (
     <div style={panel}>
       <button style={btn} onClick={() => onCycleAgent(-1)} title="Previous agent">◀</button>
@@ -48,18 +52,18 @@ export function FloorNavBar({
       <span style={{ opacity: 0.4 }} aria-hidden="true">|</span>
 
       <button
-        style={floorBtn(currentFloor <= 0)}
-        onClick={() => onSelectFloor(Math.max(0, currentFloor - 1))}
-        disabled={currentFloor <= 0}
+        style={floorBtn(prevFloor === undefined)}
+        onClick={() => { if (prevFloor !== undefined) onSelectFloor(prevFloor); }}
+        disabled={prevFloor === undefined}
         title="Floor down"
       >▼</button>
       <span style={{ fontWeight: 600, color: follow ? '#34d399' : '#fbbf24' }}>
         Floor {currentFloor}{follow ? '' : ' (manual)'}
       </span>
       <button
-        style={floorBtn(currentFloor >= maxFloor)}
-        onClick={() => onSelectFloor(Math.min(maxFloor, currentFloor + 1))}
-        disabled={currentFloor >= maxFloor}
+        style={floorBtn(nextFloor === undefined)}
+        onClick={() => { if (nextFloor !== undefined) onSelectFloor(nextFloor); }}
+        disabled={nextFloor === undefined}
         title="Floor up"
       >▲</button>
 
