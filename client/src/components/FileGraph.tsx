@@ -30,6 +30,10 @@ export function FileGraph() {
   const lastActivityVersionRef = useRef(0);
   const lastNodeCountRef = useRef(0);
   const collapsedFoldersRef = useRef<Set<string>>(new Set());
+  const userZoomRef = useRef(1);
+  const panRef = useRef({ x: 0, y: 0 });
+  const isDraggingRef = useRef(false);
+  const lastDragRef = useRef({ x: 0, y: 0 });
 
   // Simple state for UI status display - updates periodically
   const [fileCount, setFileCount] = useState(0);
@@ -52,6 +56,31 @@ export function FileGraph() {
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
+
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+      userZoomRef.current = Math.max(0.2, Math.min(5, userZoomRef.current * factor));
+    };
+    const onDown = (e: MouseEvent) => {
+      isDraggingRef.current = true;
+      lastDragRef.current = { x: e.clientX, y: e.clientY };
+      canvas.style.cursor = 'grabbing';
+    };
+    const onMove = (e: MouseEvent) => {
+      if (!isDraggingRef.current) return;
+      panRef.current = {
+        x: panRef.current.x + (e.clientX - lastDragRef.current.x),
+        y: panRef.current.y + (e.clientY - lastDragRef.current.y),
+      };
+      lastDragRef.current = { x: e.clientX, y: e.clientY };
+    };
+    const onUp = () => { isDraggingRef.current = false; canvas.style.cursor = 'grab'; };
+    canvas.style.cursor = 'grab';
+    canvas.addEventListener('wheel', onWheel, { passive: false });
+    canvas.addEventListener('mousedown', onDown);
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
 
     let isAnimating = true;
 
@@ -134,9 +163,13 @@ export function FileGraph() {
     const offsetX = padding + (availWidth - graphWidth * scale) / 2 - minX * scale;
     const offsetY = padding + (availHeight - graphHeight * scale) / 2 - minY * scale;
 
+    // Origin-anchored zoom (intentional simplification; pan compensates). HabboRoom uses cursor-anchored zoom — divergence is deliberate.
+    const z = userZoomRef.current;
+    const px = panRef.current.x;
+    const py = panRef.current.y;
     const transform = (x: number, y: number) => ({
-      x: x * scale + offsetX,
-      y: y * scale + offsetY
+      x: (x * scale + offsetX) * z + px,
+      y: (y * scale + offsetY) * z + py,
     });
 
       // Helper to get fade opacity for a node
@@ -309,6 +342,10 @@ export function FileGraph() {
       if (animationRef.current) {
         cancelAnimationFrame(animationRef.current);
       }
+      canvas.removeEventListener('wheel', onWheel);
+      canvas.removeEventListener('mousedown', onDown);
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
     };
   }, []); // Empty deps - animation loop runs continuously and reads from refs
 
