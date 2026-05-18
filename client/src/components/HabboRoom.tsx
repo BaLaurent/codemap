@@ -104,8 +104,18 @@ export function HabboRoom() {
     const root = nodes.find(n => n.depth === -1);
     const rootName = root?.name || 'Project';
 
-    const idx = Math.max(0, Math.min(nav.snapshotRef.current.currentFloorIndex, floors.length - 1));
-    const fm = floors[idx];
+    // Select the floor by its depth (FloorModel.floor), NOT by array position.
+    // buildFloorsByDepth omits empty floors, so array index != depth. If the
+    // requested depth has no floor (e.g. ▲▼ stepped onto an omitted depth),
+    // fall back to the nearest existing depth.
+    const target = nav.snapshotRef.current.currentFloorIndex;
+    const fm =
+      floors.find(f => f.floor === target) ??
+      floors.reduce(
+        (best, f) =>
+          Math.abs(f.floor - target) < Math.abs(best.floor - target) ? f : best,
+        floors[0]
+      );
 
     filePositionsRef.current.clear();
     const children: RoomLayout[] = [];
@@ -1172,7 +1182,7 @@ export function HabboRoom() {
       </div>
       <FloorNavBar
         currentFloor={nav.state.currentFloorIndex}
-        maxFloor={Math.max(0, floorsRef.current.length - 1)}
+        maxFloor={floorsRef.current.length ? Math.max(...floorsRef.current.map(f => f.floor)) : 0}
         follow={nav.state.follow}
         focusAgentId={nav.state.focusAgentId}
         focusAgentName={

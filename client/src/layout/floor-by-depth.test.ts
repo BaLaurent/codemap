@@ -206,6 +206,31 @@ describe('buildFloorsByDepth', () => {
     expect(floor0.filePositions.has('nonempty')).toBe(true);
   });
 
+  // --- integration regression discriminator -----------------------------
+  // Documents that depth-0 is omitted when its folders have no direct files,
+  // and that consumers MUST key floors by FloorModel.floor (depth), not by
+  // array position. (Regression: HabboRoom previously indexed floors[idx]
+  // where idx was a depth value → followed the wrong floor once depth-0 was
+  // omitted.)
+  it('omits depth-0 floor when its folders have no direct files but keeps depth-1', () => {
+    const nodes: GraphNode[] = [
+      rootNode(ROOT),
+      folderNode(ROOT, 'client', 0),       // depth 0, no direct files → omitted
+      folderNode(ROOT, 'client/src', 1),   // depth 1, has files
+      fileNode(ROOT, 'client/src/App.tsx', 1, { reads: 1 }),
+    ];
+    const floors = buildFloorsByDepth(nodes, []);
+    // No FloorModel with .floor === 0 (depth-0 entirely omitted).
+    expect(floors.find(f => f.floor === 0)).toBeUndefined();
+    // The depth-1 floor exists and is found by .floor, NOT by floors[1].
+    const f1 = floors.find(f => f.floor === 1);
+    expect(f1).toBeDefined();
+    expect(f1!.rooms.map(r => r.name)).toEqual(['src']);
+    // Array position 0 holds the depth-1 floor — proves consumers must
+    // never assume floors[depth] === the depth's floor.
+    expect(floors[0].floor).toBe(1);
+  });
+
   // --- filePositions keys -----------------------------------------------
 
   it('registers the full project-relative file key and the relative folder routing key', () => {
