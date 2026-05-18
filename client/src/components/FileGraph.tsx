@@ -1,17 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { useFileActivity } from '../hooks/useFileActivity';
 import { GraphNode } from '../types';
+import { calculateTreeLayout, LayoutNode } from '../layout/tree-layout';
 
 const READ_COLOR = '#3b82f6';   // Blue
 const WRITE_COLOR = '#f59e0b';  // Amber
 const FOLDER_COLOR = '#4b5563'; // Darker gray for folders
 const FILE_COLOR = '#9ca3af';   // Lighter gray for files
 const FADE_DURATION = 1000;     // 1 second fade out
-
-interface LayoutNode extends GraphNode {
-  x: number;
-  y: number;
-}
 
 interface FadingNode {
   type: 'read' | 'write';
@@ -33,6 +29,7 @@ export function FileGraph() {
   const layoutNodesRef = useRef<LayoutNode[]>([]);
   const lastActivityVersionRef = useRef(0);
   const lastNodeCountRef = useRef(0);
+  const collapsedFoldersRef = useRef<Set<string>>(new Set());
 
   // Simple state for UI status display - updates periodically
   const [fileCount, setFileCount] = useState(0);
@@ -68,7 +65,7 @@ export function FileGraph() {
       // Only recalculate layout when node count changes
       if (nodeCount !== lastNodeCountRef.current) {
         lastNodeCountRef.current = nodeCount;
-        layoutNodesRef.current = calculateTreeLayout(currentGraphData.nodes);
+        layoutNodesRef.current = calculateTreeLayout(currentGraphData.nodes, collapsedFoldersRef.current);
       }
       const layoutNodes = layoutNodesRef.current;
 
@@ -382,89 +379,6 @@ export function FileGraph() {
       />
     </div>
   );
-}
-
-// Simple tree layout algorithm
-function calculateTreeLayout(nodes: GraphNode[]): LayoutNode[] {
-  if (nodes.length === 0) return [];
-
-  // Build parent-child relationships
-  const childrenMap = new Map<string, GraphNode[]>();
-  const nodeMap = new Map<string, GraphNode>();
-
-  for (const node of nodes) {
-    nodeMap.set(node.id, node);
-    childrenMap.set(node.id, []);
-  }
-
-  // Find root (depth -1 or minimum depth)
-  let root: GraphNode | null = null;
-  let minDepth = Infinity;
-  for (const node of nodes) {
-    if (node.depth < minDepth) {
-      minDepth = node.depth;
-      root = node;
-    }
-  }
-
-  if (!root) return [];
-
-  // Build tree
-  for (const node of nodes) {
-    if (node.id === root.id) continue;
-    // Find parent by checking if parent path exists
-    const parentPath = node.id.substring(0, node.id.lastIndexOf('/'));
-    if (childrenMap.has(parentPath)) {
-      childrenMap.get(parentPath)!.push(node);
-    } else if (root) {
-      // Orphan nodes attach to root
-      childrenMap.get(root.id)?.push(node);
-    }
-  }
-
-  // Sort children alphabetically, folders first
-  for (const [, children] of childrenMap) {
-    children.sort((a, b) => {
-      if (a.isFolder !== b.isFolder) return a.isFolder ? -1 : 1;
-      return a.name.localeCompare(b.name);
-    });
-  }
-
-  // Layout using simple recursive positioning
-  const layoutNodes: LayoutNode[] = [];
-  const nodeSpacingX = 180;
-  const nodeSpacingY = 50;
-
-  let currentY = 0;
-
-  function layoutSubtree(node: GraphNode, depth: number): { minY: number; maxY: number } {
-    const children = childrenMap.get(node.id) || [];
-
-    if (children.length === 0) {
-      // Leaf node
-      const y = currentY;
-      currentY += nodeSpacingY;
-      layoutNodes.push({ ...node, x: depth * nodeSpacingX, y });
-      return { minY: y, maxY: y };
-    }
-
-    // Layout children first
-    const childBounds: { minY: number; maxY: number }[] = [];
-    for (const child of children) {
-      childBounds.push(layoutSubtree(child, depth + 1));
-    }
-
-    // Position parent at center of children
-    const minY = Math.min(...childBounds.map(b => b.minY));
-    const maxY = Math.max(...childBounds.map(b => b.maxY));
-    const y = (minY + maxY) / 2;
-
-    layoutNodes.push({ ...node, x: depth * nodeSpacingX, y });
-    return { minY, maxY };
-  }
-
-  layoutSubtree(root, 0);
-  return layoutNodes;
 }
 
 // Helper to interpolate between two hex colors
