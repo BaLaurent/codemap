@@ -2,37 +2,6 @@
 // hidden; a collapsed folder gets `collapsedCount` = number of hidden descendants.
 import { GraphNode } from '../types';
 
-// Returns the connected subset of `nodes` containing only files with recorded
-// activity, all their ancestor folders, and the root. Used to keep the Tree
-// view an activity mini-map instead of the full project tree.
-export function pruneToActive(nodes: GraphNode[]): GraphNode[] {
-  if (nodes.length === 0) return [];
-  const byId = new Map(nodes.map(n => [n.id, n]));
-  const root = nodes.reduce<GraphNode | null>((r, n) => (!r || n.depth < r.depth ? n : r), null);
-  const keep = new Set<string>();
-  if (root) keep.add(root.id);
-  const isActive = (n: GraphNode) =>
-    !n.isFolder &&
-    ((n.activityCount.reads + n.activityCount.writes + n.activityCount.searches) > 0 || !!n.lastActivity);
-  for (const n of nodes) {
-    if (!isActive(n)) continue;
-    keep.add(n.id);
-    // Walk ancestors by path prefix. Relies on the server (activity-store)
-    // materializing every intermediate folder node so each prefix resolves via
-    // `byId`; a missing folder is simply skipped (bounded by the loop guard).
-    // Parent derivation hard-codes '/' (Linux-only per project constraints),
-    // consistent with calculateTreeLayout's own prefix parenting.
-    let pid = n.id.substring(0, n.id.lastIndexOf('/'));
-    while (pid && !keep.has(pid)) {
-      if (byId.has(pid)) keep.add(pid);
-      const next = pid.substring(0, pid.lastIndexOf('/'));
-      if (next === pid) break;
-      pid = next;
-    }
-  }
-  return nodes.filter(n => keep.has(n.id));
-}
-
 export interface LayoutNode extends GraphNode {
   x: number;
   y: number;

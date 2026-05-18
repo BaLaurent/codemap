@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useFileActivity } from '../hooks/useFileActivity';
 import { GraphNode } from '../types';
-import { calculateTreeLayout, pruneToActive, LayoutNode } from '../layout/tree-layout';
+import { calculateTreeLayout, LayoutNode } from '../layout/tree-layout';
 
 const READ_COLOR = '#3b82f6';   // Blue
 const WRITE_COLOR = '#f59e0b';  // Amber
@@ -29,15 +29,7 @@ export function FileGraph() {
   const layoutNodesRef = useRef<LayoutNode[]>([]);
   const lastActivityVersionRef = useRef(0);
   const lastNodeCountRef = useRef(0);
-  // Separate from lastActivityVersionRef (which gates the fading handler).
-  // Tracks the activity version at the time of the last layout recompute so
-  // that new file activity triggers a mini-map rebuild even when node count
-  // hasn't changed (e.g. activityCount increments on existing nodes).
-  const lastLayoutActivityVersionRef = useRef(0);
-  // Whether the last pruned layout contained any active FILE node. Drives the
-  // "Waiting for file activity..." empty-state so users never see a lone,
-  // contextless root circle once the server scan materializes the tree.
-  const hasActiveNodesRef = useRef(false);
+  const collapseSeededRef = useRef(false);
   const collapsedFoldersRef = useRef<Set<string>>(new Set());
   const userZoomRef = useRef(1);
   const panRef = useRef({ x: 0, y: 0 });
@@ -129,24 +121,23 @@ export function FileGraph() {
       const currentGraphData = graphDataRef.current;
       const nodeCount = currentGraphData.nodes.length;
 
-      // Recalculate layout when node count changes, activity changes, or layout
-      // is marked dirty (e.g. folder collapse). Activity version is tracked
-      // separately from lastActivityVersionRef which gates the fading handler.
-      const currentActivityVersion = activityVersionRef.current;
+      // Recalculate layout when node count changes or layout is marked dirty
+      // (e.g. folder collapse via B3 click handler).
       if (
         nodeCount !== lastNodeCountRef.current ||
-        currentActivityVersion !== lastLayoutActivityVersionRef.current ||
         layoutDirtyRef.current
       ) {
         lastNodeCountRef.current = nodeCount;
-        lastLayoutActivityVersionRef.current = currentActivityVersion;
         layoutDirtyRef.current = false;
-        const activeNodes = pruneToActive(currentGraphData.nodes);
-        // pruneToActive always keeps the root; a set with no FILE node means
-        // nothing is active yet, so render the waiting state instead of a lone
-        // contextless root circle.
-        hasActiveNodesRef.current = activeNodes.some(n => !n.isFolder);
-        layoutNodesRef.current = calculateTreeLayout(activeNodes, collapsedFoldersRef.current);
+        // Seed depth>=1 folders as collapsed on the first non-empty graph so
+        // the initial view shows only root + depth-0 folders (each with +N badge).
+        if (!collapseSeededRef.current && currentGraphData.nodes.length > 0) {
+          for (const n of currentGraphData.nodes) {
+            if (n.isFolder && n.depth >= 1) collapsedFoldersRef.current.add(n.id);
+          }
+          collapseSeededRef.current = true;
+        }
+        layoutNodesRef.current = calculateTreeLayout(currentGraphData.nodes, collapsedFoldersRef.current);
       }
       const layoutNodes = layoutNodesRef.current;
 
@@ -190,7 +181,7 @@ export function FileGraph() {
       ctx.fillStyle = '#1f2937';
       ctx.fillRect(0, 0, rect.width, rect.height);
 
-      if (layoutNodes.length === 0 || !hasActiveNodesRef.current) {
+      if (layoutNodes.length === 0) {
         ctx.fillStyle = '#6b7280';
         ctx.font = '16px system-ui';
         ctx.textAlign = 'center';
