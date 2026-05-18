@@ -8,8 +8,11 @@
  * - Providing graph data for visualization
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import path from 'path';
+import fs from 'fs';
+import os from 'os';
+import { ActivityStore } from './activity-store.js';
 
 // We test the logic without filesystem dependencies
 // by simulating the core algorithms
@@ -406,5 +409,99 @@ describe('ActivityStore: Recently Active Files', () => {
 
     expect(recentFiles).toContain('recent.ts');
     expect(recentFiles).not.toContain('old.ts');
+  });
+});
+
+/**
+ * Real ActivityStore against a real temp filesystem.
+ *
+ * These exercise the actual class (not the mock reimplementation above)
+ * because the IGNORED_DIRS filtering bug only manifests with the real
+ * path.relative + watcher against an absolute project root.
+ */
+describe('ActivityStore: IGNORED_DIRS filtering (real class)', () => {
+  const tmpRoots: string[] = [];
+  let store: ActivityStore | undefined;
+
+  function makeTmpDir(prefix: string): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+    tmpRoots.push(dir);
+    return dir;
+  }
+
+  afterEach(() => {
+    if (store) {
+      store.stopWatching();
+      store = undefined;
+    }
+    while (tmpRoots.length) {
+      const dir = tmpRoots.pop()!;
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('REGRESSION: project rooted under an ANCESTOR dir whose name is in IGNORED_DIRS still tracks files', () => {
+    // e.g. /tmp/build-xxxx/proj  — "build" is an IGNORED_DIRS segment in the
+    // ABSOLUTE path but is an ANCESTOR of the project root, not inside it.
+    const ancestor = makeTmpDir('build-');
+    const projectRoot = path.join(ancestor, 'proj');
+    fs.mkdirSync(path.join(projectRoot, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(projectRoot, 'src', 'app.ts'), 'export const x = 1;');
+
+    store = new ActivityStore(projectRoot);
+
+    const ids = store.getGraphData().nodes.map(n => n.id);
+    expect(ids).toContain(path.join(projectRoot, 'src'));
+    expect(ids).toContain(path.join(projectRoot, 'src', 'app.ts'));
+
+    // addActivity (hook-fed, absolute path) must also work under this root
+    store.addActivity({
+      type: 'read-end',
+      filePath: path.join(projectRoot, 'src', 'app.ts'),
+      timestamp: Date.now()
+    });
+    const node = store.getGraphData().nodes.find(
+      n => n.id === path.join(projectRoot, 'src', 'app.ts')
+    )!;
+    expect(node.activityCount.reads).toBe(1);
+  });
+
+  it('excludes node_modules contents from the initial scan', () => {
+    const projectRoot = makeTmpDir('proj-');
+    fs.mkdirSync(path.join(projectRoot, 'node_modules', 'foo'), { recursive: true });
+    fs.writeFileSync(path.join(projectRoot, 'node_modules', 'foo', 'index.js'), 'module.exports={}');
+    fs.mkdirSync(path.join(projectRoot, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(projectRoot, 'src', 'real.ts'), 'export {};');
+
+    store = new ActivityStore(projectRoot);
+
+    const ids = store.getGraphData().nodes.map(n => n.id);
+    expect(ids).toContain(path.join(projectRoot, 'src', 'real.ts'));
+    expect(ids.some(id => id.includes(`${path.sep}node_modules${path.sep}`))).toBe(false);
+    expect(ids).not.toContain(path.join(projectRoot, 'node_modules'));
+  });
+
+  it('handleFileAdd-equivalent path under an ignored dir is excluded; addActivity ignores it', () => {
+    const projectRoot = makeTmpDir('proj-');
+    fs.mkdirSync(path.join(projectRoot, 'dist'), { recursive: true });
+    fs.writeFileSync(path.join(projectRoot, 'dist', 'bundle.js'), '/* built */');
+
+    store = new ActivityStore(projectRoot);
+
+    // Initial scan must not have created the dist subtree.
+    let ids = store.getGraphData().nodes.map(n => n.id);
+    expect(ids).not.toContain(path.join(projectRoot, 'dist'));
+    expect(ids).not.toContain(path.join(projectRoot, 'dist', 'bundle.js'));
+
+    // A hook event targeting a file inside an ignored dir must be a no-op.
+    const before = store.getGraphData().nodes.length;
+    store.addActivity({
+      type: 'write-end',
+      filePath: path.join(projectRoot, 'dist', 'bundle.js'),
+      timestamp: Date.now()
+    });
+    ids = store.getGraphData().nodes.map(n => n.id);
+    expect(store.getGraphData().nodes.length).toBe(before);
+    expect(ids).not.toContain(path.join(projectRoot, 'dist', 'bundle.js'));
   });
 });

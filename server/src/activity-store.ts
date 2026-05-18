@@ -36,9 +36,20 @@ export class ActivityStore {
     this.onChangeCallback = callback;
   }
 
+  // True if absPath, RELATIVE to projectRoot, passes through an IGNORED_DIRS
+  // segment. Operating on the relativized path is essential: chokidar emits
+  // absolute paths, and if the project itself lives under a dir whose name
+  // collides with IGNORED_DIRS (e.g. /home/u/build/app, ~/.cache/proj) a
+  // naive absolute-path split would drop EVERY watcher event.
+  private isIgnoredRelPath(absPath: string): boolean {
+    const rel = path.relative(this.projectRoot, absPath);
+    if (rel === '' || rel.startsWith('..')) return false; // root itself / outside root
+    return rel.split(path.sep).some(seg => IGNORED_DIRS.has(seg));
+  }
+
   private startWatching(): void {
     this.watcher = chokidar.watch(this.projectRoot, {
-      ignored: (p: string) => p.split(/[\\/]/).some(seg => IGNORED_DIRS.has(seg)),
+      ignored: (p: string) => this.isIgnoredRelPath(p),
       persistent: true,
       ignoreInitial: true, // Don't fire events for existing files
       awaitWriteFinish: { stabilityThreshold: 100, pollInterval: 50 }
@@ -56,7 +67,7 @@ export class ActivityStore {
   private handleFileAdd(filePath: string, isFolder: boolean): void {
     const relativePath = path.relative(this.projectRoot, filePath);
     if (relativePath.startsWith('..')) return;
-    if (relativePath.split(path.sep).some(seg => IGNORED_DIRS.has(seg))) return;
+    if (this.isIgnoredRelPath(filePath)) return;
 
     const depth = relativePath.split(path.sep).length - 1;
 
@@ -126,6 +137,8 @@ export class ActivityStore {
     try {
       const entries = fs.readdirSync(dir, { withFileTypes: true });
       for (const entry of entries) {
+        // Directory-name-only by design: a file literally named e.g. "build"
+        // is NOT filtered here (only real ignored directories are skipped).
         if (entry.isDirectory() && IGNORED_DIRS.has(entry.name)) continue;
 
         const fullPath = path.join(dir, entry.name);
@@ -162,12 +175,12 @@ export class ActivityStore {
       return this.getGraphData();
     }
 
-    const parts = relativePath.split(path.sep);
-
     // Skip paths that pass through an ignored directory
-    if (parts.some(seg => IGNORED_DIRS.has(seg))) {
+    if (this.isIgnoredRelPath(event.filePath)) {
       return this.getGraphData();
     }
+
+    const parts = relativePath.split(path.sep);
 
     // Ensure all parent folders exist as nodes
     let currentPath = this.projectRoot;
