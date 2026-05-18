@@ -87,3 +87,36 @@ Branche : `feature/hotel-floors-by-depth`
 - Pas de parsing `.gitignore`. Pas d'indicateur d'overflow de bureaux.
 - Pas de changement de la machine de navigation d'étage (inchangée, OK).
 - Pas de persistance.
+
+---
+
+# Addendum v3 — Corrections après 2e test réel
+
+Problèmes constatés : bureaux qui débordent des salles (hôtel) ; ▲▼ d'étage
+incohérents (profondeurs vides omises) ; la mini-carte d'activité fait perdre
+le côté explorateur de l'Arbre.
+
+## Décisions
+
+- **Arbre** : revirement validé — abandonner `pruneToActive`. Arbre COMPLET
+  (après filtrage serveur), tous les dossiers de profondeur >= 1 repliés par
+  défaut (`collapsedFoldersRef` pré-rempli au chargement du graphe), clic =
+  déplier/replier (B3), zoom/pan (B2) conservés. `pruneToActive` + son câblage
+  (trigger activity-version, empty-state `hasActiveNodes`) supprimés (code mort).
+- **Hôtel — débordement** : taille de chaque salle dérivée du nombre de
+  bureaux ; toutes les salles d'un étage dimensionnées sur la salle la plus
+  remplie de cet étage (grille régulière, rien ne déborde, l'étage grandit en
+  hauteur si besoin). Aucun fichier perdu. `HabboRoom` gère déjà des salles de
+  taille variable (`room.width/height` par salle) — pas de changement chrome.
+- **Hôtel — navigation d'étage** : `FloorNavBar` reçoit `availableFloors:
+  number[]` (profondeurs réellement présentes, triées) ; ▲▼ saute d'un étage
+  existant au suivant/précédent (plus de ±1 sur une profondeur inexistante) ;
+  libellé toujours cohérent. Contrat `FloorNavBar` étendu (drift assumé,
+  documenté ici).
+
+## Tâches (séquentielles : W1 → W2 → W3, un commit chacune)
+
+- **W1** `floor-by-depth.ts` (+test) : salles dimensionnées par contenu.
+- **W2** `FloorNavBar.tsx` + `HabboRoom.tsx` : ▲▼ parmi étages existants.
+- **W3** `FileGraph.tsx` + `tree-layout.ts` (+test) : arbre complet replié
+  par défaut ; suppression de `pruneToActive` et de son câblage (code mort).
