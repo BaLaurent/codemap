@@ -1,5 +1,8 @@
 // Pure layout engine: groups project folders into hotel floors by path depth.
-// Floor N = every folder whose path has N+1 segments (root-level = floor 0).
+// Floor N = every folder whose server-emitted depth equals N (depth 0 = top-level folder).
+// Node ids from the server are ABSOLUTE filesystem paths; hotFolders.folder and
+// activity filePaths are PROJECT-RELATIVE. This module converts abs ids to rel paths
+// for all score/recent/filePositions lookups.
 import { GraphNode, FolderScore } from '../types';
 import { RoomLayout, FileLayout, FloorStyle } from '../drawing/types';
 import { getFloorStyle, seededRandom, TILE_SIZE } from '../drawing';
@@ -19,6 +22,10 @@ export interface FloorModel {
   filePositions: Map<string, { x: number; y: number }>;
 }
 
+// floorOfFolder and findFloorForFile operate on PROJECT-RELATIVE strings.
+// HabboRoom calls findFloorForFile with a relative activity path.
+// These functions must NOT be changed.
+
 export function floorOfFolder(folderPath: string): number {
   if (folderPath === '' || folderPath === '.') return 0;
   return folderPath.split('/').length - 1;
@@ -37,6 +44,20 @@ export function buildFloorsByDepth(
   const folders = nodes.filter(n => n.isFolder && n.depth >= 0);
   if (folders.length === 0) return [];
 
+  // Find the root node (depth === -1) to derive the absolute prefix for relativization.
+  const root = nodes.find(n => n.depth === -1);
+  const rootId = root ? root.id : '';
+
+  // Convert an absolute node id to a project-relative path.
+  // e.g. '/proj/client/src' → 'client/src', '/proj' → ''
+  const toRel = (absId: string): string => {
+    if (!rootId) return absId;
+    if (absId === rootId) return '';
+    return absId.startsWith(rootId + '/') ? absId.slice(rootId.length + 1) : absId;
+  };
+
+  // Build score/recent maps keyed by project-relative folder path
+  // (matching hotFolders.folder which is already project-relative).
   const scoreOf = new Map<string, number>();
   const recentOf = new Map<string, string[]>();
   for (const h of hotFolders) {
@@ -44,9 +65,11 @@ export function buildFloorsByDepth(
     recentOf.set(h.folder, h.recentFiles);
   }
 
+  // Group folder nodes by their server-emitted depth (which IS the correct
+  // relativized floor index: depth 0 = top-level folder = floor 0).
   const byFloor = new Map<number, GraphNode[]>();
   for (const f of folders) {
-    const floor = floorOfFolder(f.id);
+    const floor = f.depth;
     if (!byFloor.has(floor)) byFloor.set(floor, []);
     byFloor.get(floor)!.push(f);
   }
@@ -54,8 +77,12 @@ export function buildFloorsByDepth(
   const floors: FloorModel[] = [];
   for (const floor of Array.from(byFloor.keys()).sort((a, b) => a - b)) {
     const folderNodes = byFloor.get(floor)!.slice();
+
+    // Sort by git score (desc), then by absolute id as stable tiebreaker.
     folderNodes.sort((a, b) => {
-      const d = (scoreOf.get(b.id) ?? 0) - (scoreOf.get(a.id) ?? 0);
+      const relA = toRel(a.id);
+      const relB = toRel(b.id);
+      const d = (scoreOf.get(relB) ?? 0) - (scoreOf.get(relA) ?? 0);
       return d !== 0 ? d : a.id.localeCompare(b.id);
     });
 
@@ -63,12 +90,15 @@ export function buildFloorsByDepth(
     const filePositions = new Map<string, { x: number; y: number }>();
 
     folderNodes.forEach((node, idx) => {
+      const relPath = toRel(node.id);
+
       const col = idx % ROOMS_PER_ROW;
       const row = Math.floor(idx / ROOMS_PER_ROW);
       const roomX = 1 + col * (ROOM_WIDTH + ROOM_GAP);
       const roomY = 1 + row * (ROOM_HEIGHT + ROW_GAP);
-      const score = scoreOf.get(node.id) ?? 0;
-      const recent = recentOf.get(node.id) ?? [];
+      const score = scoreOf.get(relPath) ?? 0;
+      // recentFiles are bare BASENAMES (path.basename) as emitted by git-activity.ts.
+      const recent = recentOf.get(relPath) ?? [];
       const floorStyle: FloorStyle = getFloorStyle(node.name, floor);
 
       const files: FileLayout[] = [];
@@ -79,22 +109,25 @@ export function buildFloorsByDepth(
         const r = Math.floor(i / cols);
         const deskX = roomX + 2 + c * 5;
         const deskY = roomY + 3 + r * 4;
-        const fileId = recent[i];
-        filePositions.set(fileId, {
+        // Basename from git-activity; join with relPath to get the full relative file path.
+        const basename = recent[i];
+        const fileKey = relPath === '' ? basename : `${relPath}/${basename}`;
+        filePositions.set(fileKey, {
           x: deskX * TILE_SIZE + TILE_SIZE * 1.5,
           y: deskY * TILE_SIZE + TILE_SIZE,
         });
         files.push({
           x: deskX, y: deskY,
-          name: fileId.split('/').pop() || node.name,
-          id: fileId,
+          name: basename,
+          id: fileKey,
           isActive: false, isWriting: false,
           deskStyle: Math.floor(seededRandom(deskX * 53 + deskY * 97 + i * 13) * 3),
           heatLevel: Math.min(1, score / HEAT_DIVISOR),
         });
       }
 
-      filePositions.set(node.id, {
+      // Register relative folder path as routing key for agents moving to a folder.
+      filePositions.set(relPath, {
         x: (roomX + Math.floor(ROOM_WIDTH / 2)) * TILE_SIZE + TILE_SIZE * 1.5,
         y: (roomY + Math.floor(ROOM_HEIGHT / 2)) * TILE_SIZE + TILE_SIZE,
       });
