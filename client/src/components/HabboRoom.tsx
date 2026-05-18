@@ -8,15 +8,7 @@ import { findMatchingFileId } from '../utils/screen-flash';
 
 const API_URL = 'http://localhost:5174/api';
 
-// Multi-floor layout - symmetric diamond shape
-// Expands in middle, tapers at top and bottom for balanced look
-// Floor widths calculated so each floor fills same total width
-const FLOOR_CONFIG = [
-  { rooms: 2, filesPerRoom: 8, roomWidth: 23, roomHeight: 14 },  // Ground floor - 2 big rooms (fill width)
-  { rooms: 4, filesPerRoom: 2, roomWidth: 11, roomHeight: 10 },  // Floor 1 - 4 medium rooms
-  { rooms: 4, filesPerRoom: 1, roomWidth: 11, roomHeight: 8 },   // Floor 2 - 4 small rooms
-  { rooms: 2, filesPerRoom: 1, roomWidth: 23, roomHeight: 8 },   // Floor 3 (top) - 2 small rooms (fill width)
-];
+const HOT_FOLDERS_LIMIT = 12;
 import { buildFloorsByDepth, FloorModel, findFloorForFile } from '../layout/floor-by-depth';
 import {
   TILE_SIZE,
@@ -306,7 +298,7 @@ export function HabboRoom() {
 
     // Fetch hot folders - includes git history + live activity
     const fetchHotFolders = () => {
-      fetch(`${API_URL}/hot-folders?limit=${FLOOR_CONFIG.reduce((sum, cfg) => sum + cfg.rooms, 0)}`)
+      fetch(`${API_URL}/hot-folders?limit=${HOT_FOLDERS_LIMIT}`)
         .then(res => res.json())
         .then((data: FolderScore[]) => {
           // Check if data actually changed to avoid unnecessary rebuilds
