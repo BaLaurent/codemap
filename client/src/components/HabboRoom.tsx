@@ -68,6 +68,7 @@ export function HabboRoom() {
   const lastActivityByAgentRef = useRef<Map<string, { filePath: string; timestamp: number }>>(new Map());
   const lastProjectRootRef = useRef<string | null>(null);
   const lastNodeCountRef = useRef<number>(0);
+  const lastRenderedFloorRef = useRef(-1);
   const lastActivityVersionRef = useRef(0);
   const lastThinkingVersionRef = useRef(0);
   const lastLayoutVersionRef = useRef(0);
@@ -111,29 +112,27 @@ export function HabboRoom() {
     const root = nodes.find(n => n.depth === -1);
     const rootName = root?.name || 'Project';
 
+    const idx = Math.max(0, Math.min(nav.snapshotRef.current.currentFloorIndex, floors.length - 1));
+    const fm = floors[idx];
+
     filePositionsRef.current.clear();
     const children: RoomLayout[] = [];
-    let stackY = 1;
     let maxWidth = 1;
-
-    for (const fm of floors) {
-      for (const [id, pos] of fm.filePositions) {
-        filePositionsRef.current.set(id, { x: pos.x, y: pos.y + stackY * TILE_SIZE });
-      }
-      let floorBottom = 0;
-      for (const room of fm.rooms) {
-        children.push({ ...room, y: room.y + stackY });
-        floorBottom = Math.max(floorBottom, room.y + room.height);
-        maxWidth = Math.max(maxWidth, room.x + room.width);
-      }
-      stackY += floorBottom + 2;
+    let maxHeight = 1;
+    for (const [id, pos] of fm.filePositions) {
+      filePositionsRef.current.set(id, pos);
+    }
+    for (const room of fm.rooms) {
+      children.push(room);
+      maxWidth = Math.max(maxWidth, room.x + room.width);
+      maxHeight = Math.max(maxHeight, room.y + room.height);
     }
 
     return {
       x: 1,
       y: 1,
       width: maxWidth + 1,
-      height: stackY,
+      height: maxHeight + 1,
       name: rootName,
       files: [],
       children,
@@ -335,6 +334,30 @@ export function HabboRoom() {
       if (!running) return;
       const now = performance.now();
       frame++;
+
+      // Rebuild the layout when nodes change OR the displayed floor changes.
+      // Reads graphDataRef/snapshotRef directly so it is correct from any
+      // call site within the frame (single source of rebuild logic).
+      const ensureLayoutForCurrentFloor = () => {
+        const graphData = graphDataRef.current;
+        const nodeCount = graphData.nodes.length;
+        const cur = nav.snapshotRef.current.currentFloorIndex;
+        if (
+          nodeCount !== lastNodeCountRef.current ||
+          !layoutRef.current ||
+          cur !== lastRenderedFloorRef.current
+        ) {
+          lastNodeCountRef.current = nodeCount;
+          lastRenderedFloorRef.current = cur;
+          layoutRef.current = buildLayout(graphData.nodes);
+
+          const projectRoot = graphData.nodes.find(n => n.depth === -1)?.id || null;
+          if (projectRoot !== lastProjectRootRef.current) {
+            lastProjectRootRef.current = projectRoot;
+            layoutInitializedRef.current = false;
+          }
+        }
+      };
 
       // Calculate FPS
       if (lastFrameTimeRef.current > 0) {
@@ -589,6 +612,11 @@ export function HabboRoom() {
             });
             nav.noteAgentActivity(agentId, findFloorForFile(recentActivity.filePath));
 
+            // The activity may have switched the active floor (follow mode).
+            // Rebuild now so filePositionsRef reflects the new floor BEFORE
+            // we compute this agent's target below.
+            ensureLayoutForCurrentFloor();
+
             // Use same matching logic as screen flash for consistency
             // This ensures agent goes to same desk that lights up
             let filePos: { x: number; y: number } | undefined;
@@ -642,6 +670,13 @@ export function HabboRoom() {
       const MOVE_SPEED = 6;
       for (const [, char] of agentCharactersRef.current) {
         char.frame = frame;
+
+        // Freeze off-floor agents: skip movement/idle retargeting so they
+        // don't drift or get pulled to the current floor's coffee shop.
+        const agentFloor = nav.agentFloorsRef.current.get(char.agentId);
+        if (agentFloor !== undefined && agentFloor !== nav.snapshotRef.current.currentFloorIndex) {
+          continue;
+        }
 
         // Check if agent should go to coffee shop (inactive for 30+ seconds)
         const timeSinceActivity = Date.now() - char.lastActivity;
@@ -698,19 +733,8 @@ export function HabboRoom() {
         char.isIdle = shouldGoToCoffeeShop && !char.isMoving;
       }
 
-      // Only rebuild layout when nodes change
-      const currentGraphData = graphDataRef.current;
-      const nodeCount = currentGraphData.nodes.length;
-      if (nodeCount !== lastNodeCountRef.current || !layoutRef.current) {
-        lastNodeCountRef.current = nodeCount;
-        layoutRef.current = buildLayout(currentGraphData.nodes);
-
-        const projectRoot = currentGraphData.nodes.find(n => n.depth === -1)?.id || null;
-        if (projectRoot !== lastProjectRootRef.current) {
-          lastProjectRootRef.current = projectRoot;
-          layoutInitializedRef.current = false;
-        }
-      }
+      // Rebuild layout if nodes or displayed floor changed (top-of-frame site)
+      ensureLayoutForCurrentFloor();
 
       // Draw sky background
       ctx.fillStyle = '#C8E8F8';
@@ -856,8 +880,12 @@ export function HabboRoom() {
         }
         ctx.globalAlpha = 1;
 
-        // Draw all agent characters
+        // Draw all agent characters (only those on the current floor)
         for (const [, char] of agentCharactersRef.current) {
+          const agentFloor = nav.agentFloorsRef.current.get(char.agentId);
+          if (agentFloor !== undefined && agentFloor !== nav.snapshotRef.current.currentFloorIndex) {
+            continue;
+          }
           drawAgentCharacter(ctx, char);
         }
 
