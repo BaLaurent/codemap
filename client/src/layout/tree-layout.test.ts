@@ -210,4 +210,25 @@ describe('pruneToActive', () => {
     expect(ids).not.toContain('root/src/utils/helper.ts');
     expect(ids).not.toContain('root/src/utils');
   });
+
+  it('keeps an active file whose immediate parent folder node is missing, without throwing or looping', () => {
+    // 'root/src' folder node is intentionally absent from the input; the
+    // byId.has(pid) guard skips the missing prefix and the loop still
+    // terminates. Documents the bounded behavior of pruneToActive.
+    const nodes: GraphNode[] = [
+      inactive('root', -1, true),
+      { id: 'root/src/a.ts', name: 'a.ts', isFolder: false, depth: 1,
+        activityCount: { reads: 1, writes: 0, searches: 0 } },
+    ];
+    let result!: GraphNode[];
+    expect(() => { result = pruneToActive(nodes); }).not.toThrow();
+    const ids = result.map(r => r.id);
+    expect(ids).toContain('root/src/a.ts');
+    expect(ids).toContain('root');
+    expect(ids).not.toContain('root/src'); // missing folder is not invented
+    // calculateTreeLayout must tolerate the orphaned file (re-parents to root).
+    expect(() => calculateTreeLayout(result, new Set())).not.toThrow();
+    expect(calculateTreeLayout(result, new Set()).map(o => o.id).sort())
+      .toEqual(['root', 'root/src/a.ts'].sort());
+  });
 });

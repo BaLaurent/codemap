@@ -17,7 +17,11 @@ export function pruneToActive(nodes: GraphNode[]): GraphNode[] {
   for (const n of nodes) {
     if (!isActive(n)) continue;
     keep.add(n.id);
-    // walk ancestors by path prefix
+    // Walk ancestors by path prefix. Relies on the server (activity-store)
+    // materializing every intermediate folder node so each prefix resolves via
+    // `byId`; a missing folder is simply skipped (bounded by the loop guard).
+    // Parent derivation hard-codes '/' (Linux-only per project constraints),
+    // consistent with calculateTreeLayout's own prefix parenting.
     let pid = n.id.substring(0, n.id.lastIndexOf('/'));
     while (pid && !keep.has(pid)) {
       if (byId.has(pid)) keep.add(pid);

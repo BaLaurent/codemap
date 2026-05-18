@@ -34,6 +34,10 @@ export function FileGraph() {
   // that new file activity triggers a mini-map rebuild even when node count
   // hasn't changed (e.g. activityCount increments on existing nodes).
   const lastLayoutActivityVersionRef = useRef(0);
+  // Whether the last pruned layout contained any active FILE node. Drives the
+  // "Waiting for file activity..." empty-state so users never see a lone,
+  // contextless root circle once the server scan materializes the tree.
+  const hasActiveNodesRef = useRef(false);
   const collapsedFoldersRef = useRef<Set<string>>(new Set());
   const userZoomRef = useRef(1);
   const panRef = useRef({ x: 0, y: 0 });
@@ -138,6 +142,10 @@ export function FileGraph() {
         lastLayoutActivityVersionRef.current = currentActivityVersion;
         layoutDirtyRef.current = false;
         const activeNodes = pruneToActive(currentGraphData.nodes);
+        // pruneToActive always keeps the root; a set with no FILE node means
+        // nothing is active yet, so render the waiting state instead of a lone
+        // contextless root circle.
+        hasActiveNodesRef.current = activeNodes.some(n => !n.isFolder);
         layoutNodesRef.current = calculateTreeLayout(activeNodes, collapsedFoldersRef.current);
       }
       const layoutNodes = layoutNodesRef.current;
@@ -182,7 +190,7 @@ export function FileGraph() {
       ctx.fillStyle = '#1f2937';
       ctx.fillRect(0, 0, rect.width, rect.height);
 
-      if (layoutNodes.length === 0) {
+      if (layoutNodes.length === 0 || !hasActiveNodesRef.current) {
         ctx.fillStyle = '#6b7280';
         ctx.font = '16px system-ui';
         ctx.textAlign = 'center';
