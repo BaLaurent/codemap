@@ -1,5 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useFileActivity } from '../hooks/useFileActivity';
+import { useFloorNavigation } from '../hooks/useFloorNavigation';
+import { FloorNavBar } from './FloorNavBar';
 import { GraphNode, FolderScore } from '../types';
 import { playReadSound, playWriteSound, playWaitingSound, initAudio } from '../sounds';
 import { findMatchingFileId } from '../utils/screen-flash';
@@ -15,7 +17,7 @@ const FLOOR_CONFIG = [
   { rooms: 4, filesPerRoom: 1, roomWidth: 11, roomHeight: 8 },   // Floor 2 - 4 small rooms
   { rooms: 2, filesPerRoom: 1, roomWidth: 23, roomHeight: 8 },   // Floor 3 (top) - 2 small rooms (fill width)
 ];
-import { buildFloorsByDepth, FloorModel } from '../layout/floor-by-depth';
+import { buildFloorsByDepth, FloorModel, findFloorForFile } from '../layout/floor-by-depth';
 import {
   TILE_SIZE,
   RoomLayout,
@@ -51,6 +53,8 @@ export function HabboRoom() {
     layoutVersionRef,
     connectionStatusRef
   } = useFileActivity();
+
+  const nav = useFloorNavigation();
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const agentCharactersRef = useRef<Map<string, AgentCharacter>>(new Map());
@@ -471,6 +475,7 @@ export function HabboRoom() {
           if (now - agent.lastSeen > AGENT_GRACE_PERIOD_MS) {
             console.log(`Removing agent ${agent.displayName} after ${AGENT_GRACE_PERIOD_MS / 1000}s grace period`);
             agents.delete(id);
+            nav.removeAgent(id);
           }
         }
 
@@ -582,6 +587,7 @@ export function HabboRoom() {
               filePath: recentActivity.filePath,
               timestamp: Date.now()
             });
+            nav.noteAgentActivity(agentId, findFloorForFile(recentActivity.filePath));
 
             // Use same matching logic as screen flash for consistency
             // This ensures agent goes to same desk that lights up
@@ -1144,6 +1150,27 @@ export function HabboRoom() {
       }}>
         CodeMap
       </div>
+      <FloorNavBar
+        currentFloor={nav.state.currentFloorIndex}
+        maxFloor={Math.max(0, floorsRef.current.length - 1)}
+        follow={nav.state.follow}
+        focusAgentId={nav.state.focusAgentId}
+        focusAgentName={
+          nav.state.focusAgentId
+            ? thinkingAgentsRef.current.find(a => a.agentId === nav.state.focusAgentId)?.displayName
+            : undefined
+        }
+        agentsElsewhere={Array.from(nav.agentFloorsRef.current.entries())
+          .filter(([, f]) => f !== nav.state.currentFloorIndex)
+          .map(([agentId, floor]) => ({
+            agentId,
+            name: thinkingAgentsRef.current.find(a => a.agentId === agentId)?.displayName || `Agent ${agentId.slice(0, 6)}`,
+            floor,
+          }))}
+        onCycleAgent={nav.cycleAgent}
+        onSelectFloor={nav.selectFloor}
+        onSelectAgent={nav.selectAgent}
+      />
       <canvas
         ref={canvasRef}
         style={{
