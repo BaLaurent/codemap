@@ -34,6 +34,10 @@ export function FileGraph() {
   const panRef = useRef({ x: 0, y: 0 });
   const isDraggingRef = useRef(false);
   const lastDragRef = useRef({ x: 0, y: 0 });
+  const didDragRef = useRef(false);
+  const dragStartRef = useRef({ x: 0, y: 0 });
+  const layoutDirtyRef = useRef(false);
+  const lastTransformRef = useRef<(x: number, y: number) => { x: number; y: number }>((x, y) => ({ x, y }));
 
   // Simple state for UI status display - updates periodically
   const [fileCount, setFileCount] = useState(0);
@@ -64,6 +68,10 @@ export function FileGraph() {
     };
     const onDown = (e: MouseEvent) => {
       isDraggingRef.current = true;
+      // Reset here (not in onUp): the native 'click' fires after 'mouseup',
+      // so the flag must survive mouseup to tell click whether it was a drag.
+      didDragRef.current = false;
+      dragStartRef.current = { x: e.clientX, y: e.clientY };
       lastDragRef.current = { x: e.clientX, y: e.clientY };
       canvas.style.cursor = 'grabbing';
     };
@@ -74,11 +82,32 @@ export function FileGraph() {
         y: panRef.current.y + (e.clientY - lastDragRef.current.y),
       };
       lastDragRef.current = { x: e.clientX, y: e.clientY };
+      if (Math.hypot(e.clientX - dragStartRef.current.x, e.clientY - dragStartRef.current.y) > 4) didDragRef.current = true;
     };
     const onUp = () => { isDraggingRef.current = false; canvas.style.cursor = 'grab'; };
     canvas.style.cursor = 'grab';
+    const onClick = (e: MouseEvent) => {
+      if (didDragRef.current) return; // was a pan, not a click
+      const rect = canvas.getBoundingClientRect();
+      const cx = e.clientX - rect.left;
+      const cy = e.clientY - rect.top;
+      let hit: string | null = null;
+      let best = 20; // px hit radius
+      for (const node of layoutNodesRef.current) {
+        if (!node.isFolder) continue;
+        const p = lastTransformRef.current(node.x, node.y);
+        const d = Math.hypot(p.x - cx, p.y - cy);
+        if (d < best) { best = d; hit = node.id; }
+      }
+      if (hit) {
+        const set = collapsedFoldersRef.current;
+        if (set.has(hit)) set.delete(hit); else set.add(hit);
+        layoutDirtyRef.current = true; // force layout recompute next frame
+      }
+    };
     canvas.addEventListener('wheel', onWheel, { passive: false });
     canvas.addEventListener('mousedown', onDown);
+    canvas.addEventListener('click', onClick);
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
 
@@ -92,8 +121,9 @@ export function FileGraph() {
       const nodeCount = currentGraphData.nodes.length;
 
       // Only recalculate layout when node count changes
-      if (nodeCount !== lastNodeCountRef.current) {
+      if (nodeCount !== lastNodeCountRef.current || layoutDirtyRef.current) {
         lastNodeCountRef.current = nodeCount;
+        layoutDirtyRef.current = false;
         layoutNodesRef.current = calculateTreeLayout(currentGraphData.nodes, collapsedFoldersRef.current);
       }
       const layoutNodes = layoutNodesRef.current;
@@ -171,6 +201,7 @@ export function FileGraph() {
       x: (x * scale + offsetX) * z + px,
       y: (y * scale + offsetY) * z + py,
     });
+    lastTransformRef.current = transform;
 
       // Helper to get fade opacity for a node
       const getFadeOpacity = (nodeId: string): number => {
@@ -328,6 +359,12 @@ export function FileGraph() {
         ctx.font = node.isFolder ? 'bold 13px system-ui' : '13px system-ui';
         ctx.textAlign = 'center';
         ctx.fillText(node.name, pos.x, pos.y + size + 14, 100);
+
+        if (node.collapsedCount && node.collapsedCount > 0) {
+          ctx.fillStyle = '#fbbf24';
+          ctx.font = 'bold 12px system-ui';
+          ctx.fillText(`+${node.collapsedCount}`, pos.x, pos.y - size - 8);
+        }
       }
 
       // Continue animation loop
@@ -344,6 +381,7 @@ export function FileGraph() {
       }
       canvas.removeEventListener('wheel', onWheel);
       canvas.removeEventListener('mousedown', onDown);
+      canvas.removeEventListener('click', onClick);
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
     };
