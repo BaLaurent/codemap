@@ -8,8 +8,7 @@ import { RoomLayout, FileLayout, FloorStyle } from '../drawing/types';
 import { getFloorStyle, seededRandom, TILE_SIZE } from '../drawing';
 
 // Geometry: rooms laid left-to-right, wrapping into rows.
-const ROOM_WIDTH = 13;   // tiles
-const ROOM_HEIGHT = 9;   // tiles
+// ROOM_WIDTH and ROOM_HEIGHT are now derived per-floor from content (see buildFloorsByDepth).
 const ROOM_GAP = 1;      // tiles between rooms
 const ROOMS_PER_ROW = 6; // wrap after this many rooms
 const ROW_GAP = 1;       // tiles between wrapped rows
@@ -106,6 +105,25 @@ export function buildFloorsByDepth(
     // If no folder on this floor has direct files, omit the entire floor.
     if (nonEmptyFolders.length === 0) continue;
 
+    // Compute the floor's uniform room dimensions from the worst-case folder on this floor.
+    // This ensures no desk overflows its room regardless of file count.
+    let floorMaxCols = 1;
+    let floorMaxRows = 1;
+    for (const node of nonEmptyFolders) {
+      const relPath = toRel(node.id);
+      const directFiles = filesByParentRel.get(relPath) ?? [];
+      const filesToShow = Math.min(MAX_FILES_PER_ROOM, directFiles.length);
+      const cols = Math.max(1, Math.min(2, filesToShow));
+      const rows = Math.ceil(filesToShow / cols);
+      if (cols > floorMaxCols) floorMaxCols = cols;
+      if (rows > floorMaxRows) floorMaxRows = rows;
+    }
+    // Desk pitch: x-axis 5 tiles, y-axis 4 tiles; +margin/label padding.
+    // Width:  last desk x = roomX + 2 + (cols-1)*5; desk ~3 wide → need ≥ cols*5+5; keep ≥13
+    // Height: last desk y = roomY + 3 + (rows-1)*4; desk ~3 tall → need ≥ rows*4+5; keep ≥9
+    const roomWidth  = Math.max(13, floorMaxCols * 5 + 5);
+    const roomHeight = Math.max(9,  floorMaxRows * 4 + 5);
+
     const rooms: RoomLayout[] = [];
     const filePositions = new Map<string, { x: number; y: number }>();
 
@@ -114,8 +132,8 @@ export function buildFloorsByDepth(
 
       const col = idx % ROOMS_PER_ROW;
       const row = Math.floor(idx / ROOMS_PER_ROW);
-      const roomX = 1 + col * (ROOM_WIDTH + ROOM_GAP);
-      const roomY = 1 + row * (ROOM_HEIGHT + ROW_GAP);
+      const roomX = 1 + col * (roomWidth + ROOM_GAP);
+      const roomY = 1 + row * (roomHeight + ROW_GAP);
       const floorStyle: FloorStyle = getFloorStyle(node.name, floor);
 
       // Get direct file nodes for this folder, sort and cap.
@@ -154,12 +172,12 @@ export function buildFloorsByDepth(
 
       // Register relative folder path as routing key for agents moving to a folder.
       filePositions.set(relPath, {
-        x: (roomX + Math.floor(ROOM_WIDTH / 2)) * TILE_SIZE + TILE_SIZE * 1.5,
-        y: (roomY + Math.floor(ROOM_HEIGHT / 2)) * TILE_SIZE + TILE_SIZE,
+        x: (roomX + Math.floor(roomWidth / 2)) * TILE_SIZE + TILE_SIZE * 1.5,
+        y: (roomY + Math.floor(roomHeight / 2)) * TILE_SIZE + TILE_SIZE,
       });
 
       rooms.push({
-        x: roomX, y: roomY, width: ROOM_WIDTH, height: ROOM_HEIGHT,
+        x: roomX, y: roomY, width: roomWidth, height: roomHeight,
         name: node.name, files, children: [], depth: floor, floorStyle,
       });
     });

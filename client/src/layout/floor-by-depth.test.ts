@@ -383,4 +383,99 @@ describe('buildFloorsByDepth', () => {
     // File at root level
     expect(findFloorForFile('README.md')).toBe(0);
   });
+
+  // --- per-floor room sizing: desks must not overflow their room ----------
+
+  it('every desk in a 12-file room stays within room bounds (no overflow)', () => {
+    // Build a folder with MAX_FILES_PER_ROOM (12) file nodes.
+    const nodes: GraphNode[] = [
+      rootNode(ROOT),
+      folderNode(ROOT, 'big', 0),
+    ];
+    for (let i = 1; i <= 12; i++) {
+      nodes.push(fileNode(ROOT, `big/file${String(i).padStart(2, '0')}.ts`, 0, { reads: i }));
+    }
+    const floors = buildFloorsByDepth(nodes, []);
+    const floor0 = floors.find(f => f.floor === 0)!;
+    expect(floor0).toBeDefined();
+    const room = floor0.rooms[0];
+
+    for (const desk of room.files) {
+      // Desk tile coords are relative to the grid, room.x and room.y are also in tiles.
+      // A desk occupies up to 3 tiles wide and 3 tiles tall (sprite size).
+      expect(desk.x).toBeGreaterThanOrEqual(room.x);
+      expect(desk.x + 3).toBeLessThanOrEqual(room.x + room.width);
+      expect(desk.y).toBeGreaterThanOrEqual(room.y);
+      expect(desk.y + 3).toBeLessThanOrEqual(room.y + room.height);
+    }
+  });
+
+  it('all rooms on a given floor have identical width and height (uniform per floor)', () => {
+    // Two folders on the same floor: one with 1 file, one with 8 files.
+    // The smaller room must be sized up to match the larger.
+    const nodes: GraphNode[] = [
+      rootNode(ROOT),
+      folderNode(ROOT, 'sparse', 0),
+      folderNode(ROOT, 'dense', 0),
+      fileNode(ROOT, 'sparse/a.ts', 0, { reads: 1 }),
+    ];
+    // Add 8 files to 'dense'
+    for (let i = 1; i <= 8; i++) {
+      nodes.push(fileNode(ROOT, `dense/f${i}.ts`, 0, { reads: i }));
+    }
+    const floors = buildFloorsByDepth(nodes, []);
+    const floor0 = floors.find(f => f.floor === 0)!;
+    expect(floor0.rooms.length).toBeGreaterThanOrEqual(2);
+
+    const widths = floor0.rooms.map(r => r.width);
+    const heights = floor0.rooms.map(r => r.height);
+    // All widths equal
+    expect(new Set(widths).size).toBe(1);
+    // All heights equal
+    expect(new Set(heights).size).toBe(1);
+  });
+
+  it('a floor with 12 files has strictly greater room height than a floor with 1 file', () => {
+    // depth-0 folder: 1 file → minimal rows/cols → smaller room height
+    // depth-1 folder: 12 files → max rows → larger room height
+    const nodes: GraphNode[] = [
+      rootNode(ROOT),
+      folderNode(ROOT, 'small', 0),
+      fileNode(ROOT, 'small/one.ts', 0, { reads: 1 }),
+      folderNode(ROOT, 'small/sub', 1),
+    ];
+    for (let i = 1; i <= 12; i++) {
+      nodes.push(fileNode(ROOT, `small/sub/f${i}.ts`, 1, { reads: i }));
+    }
+    const floors = buildFloorsByDepth(nodes, []);
+    const floor0 = floors.find(f => f.floor === 0)!;
+    const floor1 = floors.find(f => f.floor === 1)!;
+    expect(floor0).toBeDefined();
+    expect(floor1).toBeDefined();
+    expect(floor1.rooms[0].height).toBeGreaterThan(floor0.rooms[0].height);
+  });
+
+  it('no two rooms on a floor overlap (including across wrapped rows)', () => {
+    // Build 7 folders to force a row wrap (ROOMS_PER_ROW = 6).
+    const nodes: GraphNode[] = [rootNode(ROOT)];
+    for (let i = 1; i <= 7; i++) {
+      nodes.push(folderNode(ROOT, `mod${i}`, 0));
+      nodes.push(fileNode(ROOT, `mod${i}/index.ts`, 0, { reads: i }));
+    }
+    const floors = buildFloorsByDepth(nodes, []);
+    const floor0 = floors.find(f => f.floor === 0)!;
+    expect(floor0.rooms.length).toBe(7);
+
+    const rooms = floor0.rooms;
+    for (let i = 0; i < rooms.length; i++) {
+      for (let j = i + 1; j < rooms.length; j++) {
+        const a = rooms[i];
+        const b = rooms[j];
+        // Rectangles [x, x+width) × [y, y+height) must be disjoint.
+        const xOverlap = a.x < b.x + b.width && a.x + a.width > b.x;
+        const yOverlap = a.y < b.y + b.height && a.y + a.height > b.y;
+        expect(xOverlap && yOverlap).toBe(false);
+      }
+    }
+  });
 });
