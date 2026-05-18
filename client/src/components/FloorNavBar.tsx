@@ -1,0 +1,78 @@
+// DOM navigation bar for the single-floor hotel view.
+import type { CSSProperties } from 'react';
+
+interface FloorNavBarProps {
+  currentFloor: number;
+  maxFloor: number;
+  follow: boolean;
+  focusAgentId: string | null;
+  focusAgentName?: string;
+  agentsElsewhere: { agentId: string; name: string; floor: number }[];
+  onCycleAgent: (dir: 1 | -1) => void;
+  onSelectFloor: (floor: number) => void;
+  onSelectAgent: (agentId: string) => void;
+}
+
+const panel: CSSProperties = {
+  position: 'absolute', top: 16, left: 16, zIndex: 20,
+  display: 'flex', alignItems: 'center', gap: 12,
+  backgroundColor: 'rgba(17, 24, 39, 0.9)',
+  padding: '10px 16px', borderRadius: '12px',
+  color: '#e5e7eb', fontSize: '13px',
+  border: '1px solid rgba(255, 255, 255, 0.1)',
+  backdropFilter: 'blur(8px)',
+};
+
+const btn: CSSProperties = {
+  background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)',
+  color: '#e5e7eb', padding: '4px 10px', borderRadius: 6, cursor: 'pointer',
+  fontSize: 13,
+};
+
+const floorBtn = (disabled: boolean): CSSProperties => ({
+  ...btn, opacity: disabled ? 0.35 : 1, cursor: disabled ? 'default' : 'pointer',
+});
+
+export function FloorNavBar({
+  currentFloor, maxFloor, follow, focusAgentId, focusAgentName, agentsElsewhere,
+  onCycleAgent, onSelectFloor, onSelectAgent,
+}: FloorNavBarProps) {
+  return (
+    <div style={panel}>
+      <button style={btn} onClick={() => onCycleAgent(-1)} title="Previous agent">◀</button>
+      <span style={{ fontWeight: 600 }}>
+        {focusAgentName ?? (focusAgentId ? `Agent ${focusAgentId.slice(0, 6)}` : 'No agent')}
+      </span>
+      <button style={btn} onClick={() => onCycleAgent(1)} title="Next agent">▶</button>
+
+      <span style={{ opacity: 0.4 }} aria-hidden="true">|</span>
+
+      <button
+        style={floorBtn(currentFloor <= 0)}
+        onClick={() => onSelectFloor(Math.max(0, currentFloor - 1))}
+        disabled={currentFloor <= 0}
+        title="Floor down"
+      >▼</button>
+      <span style={{ fontWeight: 600, color: follow ? '#34d399' : '#fbbf24' }}>
+        Floor {currentFloor}{follow ? '' : ' (manual)'}
+      </span>
+      <button
+        style={floorBtn(currentFloor >= maxFloor)}
+        onClick={() => onSelectFloor(Math.min(maxFloor, currentFloor + 1))}
+        disabled={currentFloor >= maxFloor}
+        title="Floor up"
+      >▲</button>
+
+      {agentsElsewhere.map(a => (
+        <button
+          key={a.agentId}
+          style={{ ...btn, background: 'rgba(59,130,246,0.25)' }}
+          onClick={() => onSelectAgent(a.agentId)}
+          title="Jump to this agent"
+        >
+          {a.name} · floor {a.floor} ▸
+        </button>
+      ))}
+    </div>
+  );
+}
