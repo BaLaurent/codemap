@@ -34,7 +34,7 @@ import {
   drawCoffeeShop,
 } from '../drawing';
 
-export function HabboRoom() {
+export function HabboRoom({ projectId }: { projectId?: string } = {}) {
   // All data comes via refs - NO STATE, NO RE-RENDERS
   const {
     graphDataRef,
@@ -44,7 +44,7 @@ export function HabboRoom() {
     thinkingVersionRef,
     layoutVersionRef,
     connectionStatusRef
-  } = useFileActivity();
+  } = useFileActivity(projectId);
 
   const nav = useFloorNavigation();
 
@@ -316,7 +316,8 @@ export function HabboRoom() {
 
     // Fetch hot folders - includes git history + live activity
     const fetchHotFolders = () => {
-      fetch(`${API_URL}/hot-folders?limit=${HOT_FOLDERS_LIMIT}`)
+      const projectQuery = projectId ? `&projectId=${encodeURIComponent(projectId)}` : '';
+      fetch(`${API_URL}/hot-folders?limit=${HOT_FOLDERS_LIMIT}${projectQuery}`)
         .then(res => res.json())
         .then((data: FolderScore[]) => {
           // Check if data actually changed to avoid unnecessary rebuilds
@@ -416,7 +417,10 @@ export function HabboRoom() {
       if (thinkingVersionRef.current !== lastThinkingVersionRef.current) {
         lastThinkingVersionRef.current = thinkingVersionRef.current;
         const agents = agentCharactersRef.current;
-        const thinkingAgents = thinkingAgentsRef.current;
+        // When scoped to a building, only materialize that project's agents.
+        const thinkingAgents = projectId
+          ? thinkingAgentsRef.current.filter(a => a.projectId === projectId)
+          : thinkingAgentsRef.current;
 
         // CLIENT-SIDE PROTECTION: Hard limit on agents
         const MAX_CLIENT_AGENTS = 10;
