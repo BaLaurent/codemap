@@ -7,6 +7,18 @@ const MAX_ACTIVITY_HISTORY = 50;
 
 export type ConnectionStatus = 'connected' | 'connecting' | 'disconnected';
 
+// Decide whether a WS message applies to the building we're watching.
+// `thinking` is the global agent list (filtered client-side by project elsewhere),
+// so it always applies. Other messages apply when unfiltered or projectId matches.
+export function shouldApplyMessage(
+  message: { type: string; projectId?: string },
+  watchedProjectId: string | undefined
+): boolean {
+  if (message.type === 'thinking') return true;
+  if (!watchedProjectId) return true;
+  return message.projectId === watchedProjectId;
+}
+
 // Enriched activity entry with display info for the feed
 export interface ActivityFeedEntry {
   id: number;
@@ -19,7 +31,7 @@ export interface ActivityFeedEntry {
 
 // Ref-based hook that NEVER triggers React re-renders
 // All data is stored in refs and read directly by the animation loop
-export function useFileActivity(): {
+export function useFileActivity(projectId?: string): {
   graphDataRef: MutableRefObject<GraphData>;
   recentActivityRef: MutableRefObject<FileActivityEvent | null>;
   thinkingAgentsRef: MutableRefObject<AgentThinkingState[]>;
@@ -48,8 +60,9 @@ export function useFileActivity(): {
   const connect = useCallback(() => {
     connectionStatusRef.current = 'connecting';
 
-    // Fetch initial graph state
-    fetch(`${API_URL}/graph`)
+    // Fetch initial graph state (scoped to the watched building when set)
+    const graphQuery = projectId ? `?projectId=${encodeURIComponent(projectId)}` : '';
+    fetch(`${API_URL}/graph${graphQuery}`)
       .then(res => res.json())
       .then(data => {
         graphDataRef.current = data;
@@ -89,6 +102,8 @@ export function useFileActivity(): {
     ws.onmessage = (event) => {
       try {
         const message = JSON.parse(event.data);
+        // Ignore messages for other buildings when scoped to one project.
+        if (!shouldApplyMessage(message, projectId)) return;
         if (message.type === 'graph') {
           graphDataRef.current = message.data;
         } else if (message.type === 'activity') {
@@ -132,7 +147,7 @@ export function useFileActivity(): {
         console.error('Failed to parse message:', err);
       }
     };
-  }, []);
+  }, [projectId]);
 
   useEffect(() => {
     connect();
