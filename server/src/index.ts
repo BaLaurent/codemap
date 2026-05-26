@@ -6,6 +6,7 @@ import { createServer } from 'http';
 import { WebSocketManager } from './websocket.js';
 import os from 'os';
 import { ProjectRegistry } from './project-registry.js';
+import { deriveProjectFromPath } from './project-identity.js';
 import { getHotFolders, clearCache as clearGitCache } from './git-activity.js';
 import { FileActivityEvent, ThinkingEvent, AgentThinkingState } from './types.js';
 
@@ -41,12 +42,27 @@ registry.onGraphChange((projectId, graphData) => {
   wsManager.broadcast('graph', graphData, projectId);
 });
 
-// Resolve project identity from a request body, falling back for old hooks.
+// Resolve project identity from a thinking request body (no file path available).
+// Trusts the hook's projectId when present; otherwise undefined so the caller can
+// inherit the agent's already-known building rather than clobbering it.
 function projectFieldsOf(body: { projectId?: string; projectRoot?: string; projectName?: string }) {
-  const projectRoot = body.projectRoot || FALLBACK_PROJECT_ID;
+  if (!body.projectId && !body.projectRoot) return undefined;
+  const projectRoot = body.projectRoot || (body.projectId as string);
   const projectId = body.projectId || projectRoot;
   const projectName = body.projectName || path.basename(projectRoot);
   return { projectId, projectRoot, projectName };
+}
+
+// Resolve project identity for an ACTIVITY event. Prefers the hook's projectId,
+// but when the hook is old/foreign (no projectId), derives the building from the
+// absolute file path via git — so a project running stale hooks still gets its
+// own building instead of falling into the server's own root.
+function activityProjectFields(event: FileActivityEvent) {
+  const fromBody = projectFieldsOf(event);
+  if (fromBody) return fromBody;
+  const derived = deriveProjectFromPath(event.filePath, event.type.startsWith('search'));
+  if (derived) return derived;
+  return { projectId: FALLBACK_PROJECT_ID, projectRoot: FALLBACK_PROJECT_ID, projectName: path.basename(FALLBACK_PROJECT_ID) };
 }
 
 // Track thinking state per agent
@@ -250,7 +266,7 @@ app.post('/api/activity', (req, res) => {
   const event: FileActivityEvent = req.body;
   console.log(`[${new Date().toISOString()}] ${event.type.toUpperCase()}: ${event.filePath}${event.agentId ? ` (${event.agentId.slice(0, 8)})` : ''}`);
 
-  const { projectId, projectRoot, projectName } = projectFieldsOf(event);
+  const { projectId, projectRoot, projectName } = activityProjectFields(event);
   const ws = registry.getOrCreate(projectId, projectRoot, projectName);
   ws.lastActivity = Date.now();
 
@@ -318,10 +334,14 @@ app.post('/api/thinking', (req, res) => {
     return;
   }
 
-  // Tag the agent's building and keep that workspace alive.
-  const { projectId, projectRoot, projectName } = projectFieldsOf(event);
-  state.projectId = projectId;
-  registry.getOrCreate(projectId, projectRoot, projectName).lastActivity = now;
+  // Tag the agent's building from the hook when it provides one. When it does
+  // not (old/foreign hook), keep whatever building activity events established —
+  // never clobber a known projectId with the server's fallback root.
+  const tf = projectFieldsOf(event);
+  if (tf) {
+    state.projectId = tf.projectId;
+    registry.getOrCreate(tf.projectId, tf.projectRoot, tf.projectName).lastActivity = now;
+  }
 
   // Handle agent-stop events (from Cursor stop hook)
   if (type === 'agent-stop') {
