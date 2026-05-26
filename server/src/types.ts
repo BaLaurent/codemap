@@ -21,6 +21,9 @@ export interface FileActivityEvent {
   filePath: string;  // For search: this is the search pattern (glob or regex)
   agentId?: string;  // Which agent triggered this activity
   source?: AgentSource;  // Which tool (claude/cursor)
+  projectId?: string;     // Building identity (git root or cwd)
+  projectRoot?: string;   // Absolute root path for relativization
+  projectName?: string;   // basename of projectRoot, shown as building sign
   timestamp: number;
 }
 
@@ -31,6 +34,9 @@ export interface ThinkingEvent {
   type: 'thinking-start' | 'thinking-end' | 'agent-stop';
   agentId: string;
   source?: AgentSource;  // Which tool (claude/cursor)
+  projectId?: string;     // Building identity (git root or cwd)
+  projectRoot?: string;   // Absolute root path for relativization
+  projectName?: string;   // basename of projectRoot, shown as building sign
   timestamp: number;
   toolName?: string;  // Current tool being used (e.g., "Read", "Edit", "Bash")
   toolInput?: string;  // Abbreviated tool input (file path, command, pattern)
@@ -44,6 +50,7 @@ export interface ThinkingEvent {
 export interface AgentThinkingState {
   agentId: string;
   source: AgentSource;  // Which tool this agent is from
+  projectId?: string;  // Which building/project this agent belongs to
   isThinking: boolean;
   lastActivity: number;
   displayName: string;
@@ -56,6 +63,15 @@ export interface AgentThinkingState {
   lastDuration?: number;  // Last operation duration in ms
   status?: AgentStatus;  // Completion status (completed/aborted/error)
   statusTimestamp?: number;  // When status was set (for auto-clearing)
+}
+
+/** A project the server is currently tracking (one building in the town) */
+export interface ProjectInfo {
+  projectId: string;
+  projectName: string;
+  projectRoot: string;
+  lastActivity: number;
+  agentCount: number;
 }
 
 export interface GraphNode {

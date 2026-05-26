@@ -3,12 +3,18 @@ export interface FileActivityEvent {
   type: 'read-start' | 'read-end' | 'write-start' | 'write-end' | 'search-start' | 'search-end';
   filePath: string;  // For search: this is the search pattern (glob or regex)
   agentId?: string;  // Which agent triggered this activity
+  projectId?: string;     // Building identity (git root or cwd)
+  projectRoot?: string;   // Absolute root path for relativization
+  projectName?: string;   // basename of projectRoot, shown as building sign
   timestamp: number;
 }
 
 export interface ThinkingEvent {
   type: 'thinking-start' | 'thinking-end';
   agentId: string;
+  projectId?: string;     // Building identity (git root or cwd)
+  projectRoot?: string;   // Absolute root path for relativization
+  projectName?: string;   // basename of projectRoot, shown as building sign
   timestamp: number;
 }
 
@@ -17,6 +23,7 @@ export type AgentStatus = 'completed' | 'aborted' | 'error';
 
 export interface AgentThinkingState {
   agentId: string;
+  projectId?: string;  // Which building/project this agent belongs to
   isThinking: boolean;
   lastActivity: number;
   displayName: string;
@@ -28,6 +35,15 @@ export interface AgentThinkingState {
   lastDuration?: number;  // Last operation duration in ms
   status?: AgentStatus;  // Completion status (completed/aborted/error)
   statusTimestamp?: number;  // When status was set
+}
+
+/** A project the server is currently tracking (one building in the town) */
+export interface ProjectInfo {
+  projectId: string;
+  projectName: string;
+  projectRoot: string;
+  lastActivity: number;
+  agentCount: number;
 }
 
 export interface GraphNode {
