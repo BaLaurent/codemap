@@ -18,6 +18,14 @@ if [ -z "$AGENT_ID" ]; then
     exit 0
 fi
 
+# Resolve project identity (PROJECT_ID/ROOT/NAME) and ensure the server is up
+HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CODEMAP_ROOT="$(dirname "$HOOK_DIR")"
+source "$HOOK_DIR/lib/project-id.sh"
+source "$HOOK_DIR/lib/ensure-server.sh"
+resolve_project_identity "$INPUT"
+ensure_codemap_server "$CODEMAP_ROOT"
+
 # UNIVERSAL: Extract tool name - works for both tools
 # Claude: tool_name, Cursor: tool_name or command (for shell)
 TOOL_NAME=$(echo "$INPUT" | /usr/bin/jq -r '.tool_name // .command // empty' 2>/dev/null)
@@ -66,6 +74,7 @@ echo "$(date): [$SOURCE] THINKING $EVENT_TYPE agent=${AGENT_ID:0:8} tool=$TOOL_N
 # Build JSON payload with all available fields
 # Start with base fields
 JSON_PAYLOAD="{\"type\":\"$EVENT_TYPE\",\"agentId\":\"$AGENT_ID\",\"source\":\"$SOURCE\",\"timestamp\":$(date +%s000)"
+JSON_PAYLOAD="$JSON_PAYLOAD,\"projectId\":\"$PROJECT_ID\",\"projectRoot\":\"$PROJECT_ROOT\",\"projectName\":\"$PROJECT_NAME\""
 
 # Add optional fields if present
 if [ -n "$TOOL_NAME" ]; then
@@ -115,7 +124,7 @@ if [ "$TOOL_NAME" = "Grep" ] || [ "$TOOL_NAME" = "Glob" ]; then
 
         /usr/bin/curl -s -X POST "$ACTIVITY_URL" \
             -H "Content-Type: application/json" \
-            -d "{\"type\":\"$SEARCH_EVENT_TYPE\",\"filePath\":\"$FILE_PATH\",\"agentId\":\"$AGENT_ID\",\"source\":\"$SOURCE\",\"timestamp\":$(date +%s000)}" \
+            -d "{\"type\":\"$SEARCH_EVENT_TYPE\",\"filePath\":\"$FILE_PATH\",\"agentId\":\"$AGENT_ID\",\"source\":\"$SOURCE\",\"timestamp\":$(date +%s000),\"projectId\":\"$PROJECT_ID\",\"projectRoot\":\"$PROJECT_ROOT\",\"projectName\":\"$PROJECT_NAME\"}" \
             --connect-timeout 1 \
             --max-time 2 \
             >/dev/null 2>&1 &

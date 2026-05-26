@@ -18,6 +18,14 @@ if [ -z "$AGENT_ID" ]; then
     exit 0
 fi
 
+# Resolve project identity (PROJECT_ID/ROOT/NAME) and ensure the server is up
+HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CODEMAP_ROOT="$(dirname "$HOOK_DIR")"
+source "$HOOK_DIR/lib/project-id.sh"
+source "$HOOK_DIR/lib/ensure-server.sh"
+resolve_project_identity "$INPUT"
+ensure_codemap_server "$CODEMAP_ROOT"
+
 # UNIVERSAL: Extract file path - works for both tools
 # Claude: .tool_input.file_path, Cursor: .file_path
 FILE_PATH=$(echo "$INPUT" | /usr/bin/jq -r '.tool_input.file_path // .file_path // empty' 2>/dev/null)
@@ -45,7 +53,7 @@ if [ -n "$FILE_PATH" ]; then
     # Send file activity event to server (non-blocking with timeout)
     /usr/bin/curl -s -X POST "$SERVER_URL" \
         -H "Content-Type: application/json" \
-        -d "{\"type\":\"$EVENT_TYPE\",\"filePath\":\"$FILE_PATH\",\"agentId\":\"$AGENT_ID\",\"source\":\"$SOURCE\",\"timestamp\":$(date +%s000)}" \
+        -d "{\"type\":\"$EVENT_TYPE\",\"filePath\":\"$FILE_PATH\",\"agentId\":\"$AGENT_ID\",\"source\":\"$SOURCE\",\"timestamp\":$(date +%s000),\"projectId\":\"$PROJECT_ID\",\"projectRoot\":\"$PROJECT_ROOT\",\"projectName\":\"$PROJECT_NAME\"}" \
         --connect-timeout 1 \
         --max-time 2 \
         >/dev/null 2>&1 &
@@ -59,7 +67,7 @@ if [ -n "$TOOL_NAME" ]; then
     fi
     /usr/bin/curl -s -X POST "$THINKING_URL" \
         -H "Content-Type: application/json" \
-        -d "{\"type\":\"$THINKING_TYPE\",\"agentId\":\"$AGENT_ID\",\"source\":\"$SOURCE\",\"timestamp\":$(date +%s000),\"toolName\":\"$TOOL_NAME\"}" \
+        -d "{\"type\":\"$THINKING_TYPE\",\"agentId\":\"$AGENT_ID\",\"source\":\"$SOURCE\",\"timestamp\":$(date +%s000),\"toolName\":\"$TOOL_NAME\",\"projectId\":\"$PROJECT_ID\",\"projectRoot\":\"$PROJECT_ROOT\",\"projectName\":\"$PROJECT_NAME\"}" \
         --connect-timeout 1 \
         --max-time 2 \
         >/dev/null 2>&1 &
