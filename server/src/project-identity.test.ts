@@ -33,4 +33,9 @@ describe('deriveProjectFromPath', () => {
     expect(deriveProjectFromPath('relative/path.ts', false)).toBeUndefined();
     expect(deriveProjectFromPath(undefined, false)).toBeUndefined();
   });
+
+  it('never turns the ~/.claude tooling dir into a building', () => {
+    const p = path.join(os.homedir(), '.claude', 'projects', 'x', 'memory', 'note.md');
+    expect(deriveProjectFromPath(p, false)).toBeUndefined();
+  });
 });
