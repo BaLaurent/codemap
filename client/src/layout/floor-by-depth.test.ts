@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { floorOfFolder, findFloorForFile, buildFloorsByDepth } from './floor-by-depth';
+import { floorOfFolder, findFloorForFile, buildFloorsByDepth, floorNumbers, FloorModel } from './floor-by-depth';
 import { GraphNode, FolderScore } from '../types';
 
 const ROOT = '/proj';
@@ -56,6 +56,24 @@ describe('floorOfFolder', () => {
     expect(floorOfFolder('client')).toBe(0);
     expect(floorOfFolder('client/src')).toBe(1);
     expect(floorOfFolder('client/src/components')).toBe(2);
+  });
+});
+
+// -----------------------------------------------------------------------
+// floorNumbers — the layout's report of which floors exist (consumed by the
+// nav bar). Must be distinct + sorted ascending so ▲▼ stepping is correct.
+// -----------------------------------------------------------------------
+describe('floorNumbers', () => {
+  const fm = (floor: number): FloorModel => ({ floor, rooms: [], filePositions: new Map() });
+
+  it('returns empty for no floors', () => {
+    expect(floorNumbers([])).toEqual([]);
+  });
+  it('returns distinct floor depths sorted ascending', () => {
+    expect(floorNumbers([fm(2), fm(0), fm(1)])).toEqual([0, 1, 2]);
+  });
+  it('dedupes repeated depths', () => {
+    expect(floorNumbers([fm(1), fm(1), fm(3)])).toEqual([1, 3]);
   });
 });
 

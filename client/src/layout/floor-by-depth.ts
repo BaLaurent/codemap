@@ -187,3 +187,10 @@ export function buildFloorsByDepth(
 
   return floors;
 }
+
+// Distinct floor depths present in a built layout, sorted ascending.
+// The floor module owns "which floors exist"; the navigation bar consumes
+// this to decide which up/down steps are available.
+export function floorNumbers(floors: FloorModel[]): number[] {
+  return [...new Set(floors.map(f => f.floor))].sort((a, b) => a - b);
+}

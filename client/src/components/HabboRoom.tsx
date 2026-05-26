@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useFileActivity } from '../hooks/useFileActivity';
 import { useFloorNavigation } from '../hooks/useFloorNavigation';
 import { FloorNavBar } from './FloorNavBar';
@@ -9,7 +9,7 @@ import { findMatchingFileId } from '../utils/screen-flash';
 const API_URL = 'http://localhost:5174/api';
 
 const HOT_FOLDERS_LIMIT = 12;
-import { buildFloorsByDepth, FloorModel, findFloorForFile } from '../layout/floor-by-depth';
+import { buildFloorsByDepth, FloorModel, findFloorForFile, floorNumbers } from '../layout/floor-by-depth';
 import {
   TILE_SIZE,
   RoomLayout,
@@ -47,6 +47,14 @@ export function HabboRoom() {
   } = useFileActivity();
 
   const nav = useFloorNavigation();
+
+  // The floors that currently exist, as React state so the FloorNavBar
+  // re-renders (and its ▲▼ buttons enable) when floors first appear or change.
+  // Without this the list would live only in floorsRef (a render-loop ref that
+  // never re-renders React), leaving the buttons stuck disabled with no agent
+  // activity to force a render.
+  const [availableFloors, setAvailableFloors] = useState<number[]>([]);
+  const availableFloorsRef = useRef<number[]>([]);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const agentCharactersRef = useRef<Map<string, AgentCharacter>>(new Map());
@@ -352,6 +360,18 @@ export function HabboRoom() {
           lastNodeCountRef.current = nodeCount;
           lastRenderedFloorRef.current = cur;
           layoutRef.current = buildLayout(graphData.nodes);
+
+          // buildLayout just repopulated floorsRef; surface the floor set into
+          // React state when it actually changed, so the nav bar re-renders.
+          const nextFloors = floorNumbers(floorsRef.current);
+          const prevFloors = availableFloorsRef.current;
+          if (
+            nextFloors.length !== prevFloors.length ||
+            nextFloors.some((v, i) => v !== prevFloors[i])
+          ) {
+            availableFloorsRef.current = nextFloors;
+            setAvailableFloors(nextFloors);
+          }
 
           const projectRoot = graphData.nodes.find(n => n.depth === -1)?.id || null;
           if (projectRoot !== lastProjectRootRef.current) {
@@ -1182,7 +1202,7 @@ export function HabboRoom() {
       </div>
       <FloorNavBar
         currentFloor={nav.state.currentFloorIndex}
-        availableFloors={[...new Set(floorsRef.current.map(f => f.floor))].sort((a, b) => a - b)}
+        availableFloors={availableFloors}
         follow={nav.state.follow}
         focusAgentId={nav.state.focusAgentId}
         focusAgentName={
