@@ -4,7 +4,8 @@ import path from 'path';
 import fs from 'fs';
 import { createServer } from 'http';
 import { WebSocketManager } from './websocket.js';
-import { ActivityStore } from './activity-store.js';
+import os from 'os';
+import { ProjectRegistry } from './project-registry.js';
 import { getHotFolders, clearCache as clearGitCache } from './git-activity.js';
 import { FileActivityEvent, ThinkingEvent, AgentThinkingState } from './types.js';
 
@@ -24,20 +25,8 @@ function detectProjectRoot(): string {
   return cwd;
 }
 
-const PROJECT_ROOT = detectProjectRoot();
-
-// Convert absolute file paths to relative (for client matching)
-function toRelativePath(absolutePath: string): string {
-  // Must match PROJECT_ROOT exactly (followed by / or end of string)
-  if (absolutePath === PROJECT_ROOT) {
-    return '.';
-  }
-  const prefix = PROJECT_ROOT + '/';
-  if (absolutePath.startsWith(prefix)) {
-    return absolutePath.slice(prefix.length) || '.';
-  }
-  return absolutePath;
-}
+// Fallback project identity for events arriving without project fields (old hooks).
+const FALLBACK_PROJECT_ID = detectProjectRoot();
 
 const app = express();
 app.use(cors());
@@ -45,12 +34,20 @@ app.use(express.json());
 
 const server = createServer(app);
 const wsManager = new WebSocketManager(server);
-const activityStore = new ActivityStore(PROJECT_ROOT);
 
-// Broadcast graph updates when files are created/deleted
-activityStore.onGraphChange((graphData) => {
-  wsManager.broadcast('graph', graphData);
+// One workspace per project (building). Discovered lazily from incoming events.
+const registry = new ProjectRegistry();
+registry.onGraphChange((projectId, graphData) => {
+  wsManager.broadcast('graph', graphData, projectId);
 });
+
+// Resolve project identity from a request body, falling back for old hooks.
+function projectFieldsOf(body: { projectId?: string; projectRoot?: string; projectName?: string }) {
+  const projectRoot = body.projectRoot || FALLBACK_PROJECT_ID;
+  const projectId = body.projectId || projectRoot;
+  const projectName = body.projectName || path.basename(projectRoot);
+  return { projectId, projectRoot, projectName };
+}
 
 // Track thinking state per agent
 const agentStates = new Map<string, AgentThinkingState>();
@@ -70,8 +67,9 @@ const SERVER_START_TIME = Date.now();
 const recentActivityBuffer: Array<{ type: string; filePath: string; agentId?: string; timestamp: number }> = [];
 const MAX_ACTIVITY_BUFFER = 50;
 
-// Agent state persistence
-const STATE_FILE = path.join(PROJECT_ROOT, '.codemap-state.json');
+// Agent state persistence — central, not per-project (agents carry their projectId)
+const STATE_DIR = path.join(os.homedir(), '.codemap');
+const STATE_FILE = path.join(STATE_DIR, 'state.json');
 
 function saveAgentState(): void {
   try {
@@ -79,6 +77,7 @@ function saveAgentState(): void {
       savedAt: Date.now(),
       agents: Array.from(agentStates.values()),
     };
+    fs.mkdirSync(STATE_DIR, { recursive: true });
     fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
   } catch (err) {
     console.error('Failed to save agent state:', err);
@@ -202,6 +201,7 @@ setInterval(() => {
   }
   // Broadcast updated state if any agents were removed
   if (removedAny) {
+    refreshAgentCounts();
     wsManager.broadcast('thinking', getAgentStatesArray());
   }
 }, 60000); // Check every minute
@@ -231,15 +231,33 @@ function getAgentStatesArray(): AgentThinkingState[] {
   return Array.from(agentStates.values());
 }
 
+// Recompute per-building agent counts from current agent states.
+function refreshAgentCounts(): void {
+  for (const info of registry.list()) {
+    const w = registry.get(info.projectId);
+    if (w) w.agentCount = 0;
+  }
+  for (const s of agentStates.values()) {
+    if (s.projectId) {
+      const w = registry.get(s.projectId);
+      if (w) w.agentCount++;
+    }
+  }
+}
+
 // Receive activity events from hook script
 app.post('/api/activity', (req, res) => {
   const event: FileActivityEvent = req.body;
   console.log(`[${new Date().toISOString()}] ${event.type.toUpperCase()}: ${event.filePath}${event.agentId ? ` (${event.agentId.slice(0, 8)})` : ''}`);
 
+  const { projectId, projectRoot, projectName } = projectFieldsOf(event);
+  const ws = registry.getOrCreate(projectId, projectRoot, projectName);
+  ws.lastActivity = Date.now();
+
   // Track in debug buffer
   recentActivityBuffer.push({
     type: event.type,
-    filePath: toRelativePath(event.filePath),
+    filePath: registry.toRelativePath(projectId, event.filePath),
     agentId: event.agentId,
     timestamp: Date.now()
   });
@@ -255,6 +273,7 @@ app.post('/api/activity', (req, res) => {
       // Always update last activity timestamp to keep agent alive
       // Use server time (Date.now()), not hook timestamp which can be stale
       state.lastActivity = now;
+      state.projectId = projectId;
 
       // Update current command and thinking state based on activity type
       if (event.type.endsWith('-start')) {
@@ -266,20 +285,21 @@ app.post('/api/activity', (req, res) => {
         state.isThinking = false;
       }
 
+      refreshAgentCounts();
       // Always broadcast agent state on activity to keep client in sync
       wsManager.broadcast('thinking', getAgentStatesArray());
     }
   }
 
-  const graphData = activityStore.addActivity(event);
+  const graphData = ws.store.addActivity(event);
 
   // Broadcast to all connected clients with relative path for client matching
   const clientEvent = {
     ...event,
-    filePath: toRelativePath(event.filePath)
+    filePath: registry.toRelativePath(projectId, event.filePath)
   };
-  wsManager.broadcast('activity', clientEvent);
-  wsManager.broadcast('graph', graphData);
+  wsManager.broadcast('activity', clientEvent, projectId);
+  wsManager.broadcast('graph', graphData, projectId);
 
   res.status(200).json({ success: true });
 });
@@ -297,6 +317,11 @@ app.post('/api/thinking', (req, res) => {
     res.status(200).json({ success: true, rejected: true });
     return;
   }
+
+  // Tag the agent's building and keep that workspace alive.
+  const { projectId, projectRoot, projectName } = projectFieldsOf(event);
+  state.projectId = projectId;
+  registry.getOrCreate(projectId, projectRoot, projectName).lastActivity = now;
 
   // Handle agent-stop events (from Cursor stop hook)
   if (type === 'agent-stop') {
@@ -377,6 +402,7 @@ app.post('/api/thinking', (req, res) => {
   console.log(`[${new Date().toISOString()}] ${type.toUpperCase()}: ${state.displayName} ${toolName ? `(${toolName})` : ''}${toolInput ? ` [${toolInput}]` : ''}${durationStr}`);
 
   // Broadcast all agent states to connected clients
+  refreshAgentCounts();
   wsManager.broadcast('thinking', getAgentStatesArray());
 
   res.status(200).json({ success: true });
@@ -387,20 +413,31 @@ app.get('/api/thinking', (_req, res) => {
   res.json(getAgentStatesArray());
 });
 
-// Get current graph state
-app.get('/api/graph', (_req, res) => {
-  res.json(activityStore.getGraphData());
+// List all known projects (buildings in the town)
+app.get('/api/projects', (_req, res) => {
+  res.json(registry.list());
+});
+
+// Get current graph state for a project (defaults to the first known project)
+app.get('/api/graph', (req, res) => {
+  const projectId = (req.query.projectId as string) || registry.list()[0]?.projectId;
+  const w = projectId ? registry.get(projectId) : undefined;
+  res.json(w ? w.store.getGraphData() : { nodes: [], links: [] });
 });
 
 // Get hot folders based on git history + live activity
 app.get('/api/hot-folders', async (req, res) => {
   const limit = parseInt(req.query.limit as string) || 50;
   try {
+    const projectId = (req.query.projectId as string) || registry.list()[0]?.projectId;
+    const w = projectId ? registry.get(projectId) : undefined;
+    if (!w) { res.json([]); return; }
+
     // Get git-based hot folders
-    const hotFolders = await getHotFolders(PROJECT_ROOT, limit);
+    const hotFolders = await getHotFolders(w.projectRoot, limit);
 
     // Get recently active files from live activity (last 10 minutes)
-    const recentlyActive = activityStore.getRecentlyActiveFiles(10 * 60 * 1000);
+    const recentlyActive = w.store.getRecentlyActiveFiles(10 * 60 * 1000);
 
     // Merge live activity into hot folders - prioritize recent files
     for (const folder of hotFolders) {
@@ -443,7 +480,7 @@ app.get('/api/health', (_req, res) => {
   res.json({
     status: 'ok',
     clients: wsManager.getClientCount(),
-    projectRoot: PROJECT_ROOT
+    projects: registry.list().length
   });
 });
 
@@ -454,7 +491,7 @@ app.get('/api/debug', (_req, res) => {
     server: {
       uptime: Math.floor((now - SERVER_START_TIME) / 1000),
       uptimeFormatted: `${Math.floor((now - SERVER_START_TIME) / 60000)}m ${Math.floor(((now - SERVER_START_TIME) % 60000) / 1000)}s`,
-      projectRoot: PROJECT_ROOT,
+      projects: registry.list(),
       wsClients: wsManager.getClientCount(),
     },
     agents: Array.from(agentStates.values()).map(agent => ({
@@ -477,26 +514,33 @@ app.get('/api/debug', (_req, res) => {
   });
 });
 
-// Clear graph
+// Clear graph for every known project (building)
 app.post('/api/clear', (_req, res) => {
-  activityStore.clear();
-  wsManager.broadcast('graph', activityStore.getGraphData());
+  for (const info of registry.list()) {
+    const w = registry.get(info.projectId)!;
+    w.store.clear();
+    wsManager.broadcast('graph', w.store.getGraphData(), info.projectId);
+  }
   res.json({ success: true });
 });
 
-// Handle git commit notification - refresh layout for all clients
-app.post('/api/git-commit', async (_req, res) => {
+// Handle git commit notification - refresh layout for the committing project
+app.post('/api/git-commit', async (req, res) => {
   console.log(`[${new Date().toISOString()}] Git commit detected - refreshing layout`);
 
+  const projectId = (req.body?.projectId as string) || registry.list()[0]?.projectId;
+  const w = projectId ? registry.get(projectId) : undefined;
+  if (!w) { res.json({ success: true, foldersUpdated: 0 }); return; }
+
   // Clear the git activity cache to force fresh data
-  clearGitCache(PROJECT_ROOT);
+  clearGitCache(w.projectRoot);
 
   // Fetch updated hot folders
   try {
-    const hotFolders = await getHotFolders(PROJECT_ROOT, 50);
+    const hotFolders = await getHotFolders(w.projectRoot, 50);
 
-    // Broadcast layout update to all connected clients
-    wsManager.broadcast('layout-update', { hotFolders, timestamp: Date.now() });
+    // Broadcast layout update to clients, tagged with the project
+    wsManager.broadcast('layout-update', { hotFolders, timestamp: Date.now() }, w.projectId);
 
     res.json({ success: true, foldersUpdated: hotFolders.length });
   } catch (error) {
@@ -514,7 +558,7 @@ server.listen(PORT, () => {
   ==============
   HTTP:      http://localhost:${PORT}
   WebSocket: ws://localhost:${PORT}/ws
-  Project:   ${PROJECT_ROOT}
+  Mode:      multi-project (buildings discovered from hooks)
   Agents:    ${agentStates.size} restored
   `);
 });

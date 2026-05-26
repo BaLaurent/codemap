@@ -1,7 +1,7 @@
 // WebSocket manager for real-time client communication
 import { WebSocketServer, WebSocket } from 'ws';
 import { Server } from 'http';
-import { GraphData, FileActivityEvent, AgentThinkingState, LayoutUpdateData } from './types.js';
+import { GraphData, FileActivityEvent, AgentThinkingState, LayoutUpdateData, ProjectInfo } from './types.js';
 
 interface ExtendedWebSocket extends WebSocket {
   isAlive?: boolean;
@@ -49,8 +49,8 @@ export class WebSocketManager {
     }, 30000);
   }
 
-  broadcast(type: string, data: GraphData | FileActivityEvent | AgentThinkingState[] | LayoutUpdateData): void {
-    const message = JSON.stringify({ type, data });
+  broadcast(type: string, data: GraphData | FileActivityEvent | AgentThinkingState[] | LayoutUpdateData | ProjectInfo[], projectId?: string): void {
+    const message = JSON.stringify(projectId === undefined ? { type, data } : { type, data, projectId });
     const toRemove: ExtendedWebSocket[] = [];
 
     for (const client of this.clients) {
