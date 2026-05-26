@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { BrowserRouter, Routes, Route, Link } from 'react-router-dom';
 import { FileGraph } from './components/FileGraph';
 import { ActivityLegend } from './components/ActivityLegend';
-import { HabboRoom } from './components/HabboRoom';
+import { TownView } from './components/TownView';
 import { getMuted, setMuted } from './sounds';
 
 // Mute button component
@@ -79,11 +79,11 @@ const navLinkStyle: React.CSSProperties = {
   boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)'
 };
 
-// HotelView - Shows files as desks in an isometric hotel room with animated agents
+// HotelView - Shows the town of projects (each a building); drill into one for the interior
 function HotelView() {
   return (
     <>
-      <HabboRoom />
+      <TownView />
       <div style={{
         position: 'absolute',
         top: 16,
