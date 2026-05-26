@@ -318,7 +318,7 @@ export function drawBuilding(ctx: CanvasRenderingContext2D, o: BuildingFacadeOpt
   ctx.strokeRect(o.x, bodyTop, o.w, bodyH);
 
   // Roof
-  ctx.fillStyle = '#3a4straight'.slice(0, 7) || '#3a445f';
+  ctx.fillStyle = '#3a445f';
   ctx.fillRect(o.x - 6, bodyTop - 14, o.w + 12, 14);
 
   // Windows grid (cols x floors), lit up to agentCount
