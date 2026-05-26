@@ -8,6 +8,7 @@
  */
 
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { spawn, exec } from 'child_process';
@@ -135,8 +136,8 @@ async function run() {
   console.log('🏨 CodeMap Hotel\n');
   console.log(`Project: ${TARGET_DIR}\n`);
 
-  // Step 1: Setup hooks if not already configured
-  const settingsPath = path.join(TARGET_DIR, '.claude', 'settings.local.json');
+  // Step 1: Setup hooks if not already configured (global config now)
+  const settingsPath = path.join(os.homedir(), '.claude', 'settings.json');
   const needsSetup = !fs.existsSync(settingsPath) ||
     !fs.readFileSync(settingsPath, 'utf8').includes('file-activity-hook');
 
@@ -171,38 +172,52 @@ async function run() {
   console.log('Start Claude Code or Cursor in your project to see agents! 🎮\n');
 }
 
-// Setup Claude Code hooks
+// True if a hook entry belongs to CodeMap (so we can replace it idempotently).
+function isCodemapHook(entry) {
+  const s = JSON.stringify(entry);
+  return s.includes('file-activity-hook') || s.includes('thinking-hook');
+}
+
+// Setup Claude Code hooks GLOBALLY (~/.claude/settings.json).
+// Global hooks mean every project Claude Code runs in automatically appears as a
+// building in the town — one canonical hook-script source, no per-project drift.
+// Merges additively: existing (non-CodeMap) hooks and permissions are preserved.
 function setupClaudeHooks() {
-  const claudeDir = path.join(TARGET_DIR, '.claude');
+  const claudeDir = path.join(os.homedir(), '.claude');
   if (!fs.existsSync(claudeDir)) {
     fs.mkdirSync(claudeDir, { recursive: true });
   }
 
-  const settingsPath = path.join(claudeDir, 'settings.local.json');
+  const settingsPath = path.join(claudeDir, 'settings.json');
   let settings = {};
-
   if (fs.existsSync(settingsPath)) {
     try {
+      // Back up before touching the user's global config.
+      fs.copyFileSync(settingsPath, settingsPath + '.codemap-bak');
       settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
     } catch (e) {
       // Ignore parse errors, start fresh
     }
   }
 
-  // Merge hooks
-  settings.hooks = hooksConfig.hooks;
+  // Append CodeMap hook entries to each event array, dropping any prior CodeMap
+  // entries first so re-running setup is idempotent and never duplicates.
+  settings.hooks = settings.hooks || {};
+  for (const [event, entries] of Object.entries(hooksConfig.hooks)) {
+    const kept = (settings.hooks[event] || []).filter(e => !isCodemapHook(e));
+    settings.hooks[event] = [...kept, ...entries];
+  }
 
   // Merge permissions
   if (!settings.permissions) settings.permissions = {};
   if (!settings.permissions.allow) settings.permissions.allow = [];
-
   settings.permissions.allow = settings.permissions.allow.filter(
     p => !p.includes('file-activity-hook') && !p.includes('thinking-hook')
   );
   settings.permissions.allow.push(...permissionsConfig.permissions.allow);
 
   fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
-  console.log('✓ Configured .claude/settings.local.json (Claude Code)');
+  console.log('✓ Configured ~/.claude/settings.json (Claude Code, global)');
 }
 
 // Setup Cursor hooks

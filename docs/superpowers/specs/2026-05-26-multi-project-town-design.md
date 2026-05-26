@@ -140,6 +140,25 @@ Agent (project C) ─┘                                            │ ProjectR
 - **P2 — Client multi-building (the town):** demultiplexed `BuildingState`;
   `TownView` + two-level navigation; building-facade rendering; interior reuse.
 
+## Implementation Refinements (discovered during build)
+
+1. **Hooks are installed GLOBALLY** in `~/.claude/settings.json`, not per-project.
+   Per-project setup let different projects point at different CodeMap installs
+   (e.g. an npx-cached copy with old scripts), so events arrived without
+   `projectId` and all agents fell into the server's own building. Global hooks
+   give one canonical hook-script source: every project Claude Code runs in
+   automatically becomes a building, with no per-project setup and no drift.
+   `bin/setup.js` merges additively into the global config (preserving other
+   hooks/permissions) and backs it up first. (Cursor hooks remain per-project —
+   no global Cursor hook mechanism; the backstop below covers them.)
+
+2. **Server-side identity backstop.** When an activity event arrives without
+   `projectId` (old/foreign hook), the server derives the building from the
+   event's absolute file path via `git rev-parse --show-toplevel` (cached per
+   directory). Thinking events without `projectId` never clobber an agent's
+   already-known building. This makes the town correct regardless of which hook
+   version a project runs.
+
 ## Out of Scope (YAGNI)
 
 - Per-building independent camera control (one town camera + one interior camera).
