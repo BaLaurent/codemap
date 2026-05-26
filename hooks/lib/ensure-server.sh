@@ -17,7 +17,8 @@ ensure_codemap_server() {
     if /usr/bin/curl -s --connect-timeout 1 --max-time 1 "$health" >/dev/null 2>&1; then
       exit 0
     fi
-    nohup npm --prefix "$codemap_root" run dev >/tmp/codemap-server.log 2>&1 &
+    # Start ONLY the server (not the client/Vite) to avoid a :5173 port clash.
+    nohup npm --prefix "$codemap_root" run dev:server >/tmp/codemap-server.log 2>&1 &
     for _ in 1 2 3 4 5 6 7 8 9 10; do
       sleep 0.5
       /usr/bin/curl -s --connect-timeout 1 --max-time 1 "$health" >/dev/null 2>&1 && break

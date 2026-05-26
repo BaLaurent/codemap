@@ -52,7 +52,7 @@ function projectFieldsOf(body: { projectId?: string; projectRoot?: string; proje
 // Track thinking state per agent
 const agentStates = new Map<string, AgentThinkingState>();
 const AGENT_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
-const MAX_AGENTS = 10; // HARD LIMIT - never allow more than this
+const MAX_AGENTS = 30; // HARD LIMIT - town-wide across all projects (~10 projects x 3 agents)
 const AGENT_CREATION_COOLDOWN_MS = 500; // Minimum time between new agent registrations
 let lastAgentCreationTime = 0;
 
