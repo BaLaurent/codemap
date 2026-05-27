@@ -21,7 +21,7 @@ const goldBtn: CSSProperties = {
 
 interface Listing { path: string; parent: string | null; entries: { name: string; path: string }[]; }
 
-export function FolderBrowser({ onAdded, onClose }: { onAdded: () => void; onClose: () => void }) {
+export function FolderBrowser({ onClose }: { onClose: () => void }) {
   const [listing, setListing] = useState<Listing | null>(null);
   const [error, setError] = useState('');
 
@@ -42,7 +42,7 @@ export function FolderBrowser({ onAdded, onClose }: { onAdded: () => void; onClo
       body: JSON.stringify({ path: listing.path }),
     })
       .then(r => r.ok ? r.json() : Promise.reject())
-      .then(() => { onAdded(); onClose(); })
+      .then(() => { onClose(); })
       .catch(() => setError('Impossible d’ajouter ce dossier'));
   };
 

@@ -140,7 +140,7 @@ export function TownView({ selected, onSelect, focusRequest, actionRequest }: {
       <canvas ref={canvasRef} style={{ display: 'block' }} />
       {browsing && (
         <div style={overlay} onClick={e => { if (e.target === e.currentTarget) setBrowsing(false); }}>
-          <FolderBrowser onAdded={() => {}} onClose={() => setBrowsing(false)} />
+          <FolderBrowser onClose={() => setBrowsing(false)} />
         </div>
       )}
       {confirmKill && (
