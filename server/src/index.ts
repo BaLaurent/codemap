@@ -332,7 +332,7 @@ app.post('/api/activity', (req, res) => {
 // Receive thinking events
 app.post('/api/thinking', (req, res) => {
   const event: ThinkingEvent = req.body;
-  const { agentId, type, toolName, toolInput, agentType, model, duration, status } = event;
+  const { agentId, type, toolName, toolInput, question, agentType, model, duration, status } = event;
   const now = Date.now();
 
   // Register or get existing agent using safe registration
@@ -382,6 +382,14 @@ app.post('/api/thinking', (req, res) => {
   } else if (type === 'thinking-start') {
     // Clear tool input when tool completes
     state.toolInput = undefined;
+  }
+
+  // Update the agent's pending question (from AskUserQuestion). Set when the
+  // tool starts, cleared when it completes — same lifecycle as waitingForInput.
+  if (question) {
+    state.question = question;
+  } else if (type === 'thinking-start') {
+    state.question = undefined;
   }
 
   // Update agent type if provided (persists for agent lifetime)

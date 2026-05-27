@@ -1,5 +1,7 @@
 // Drawing types for CodeMap Hotel visualization
 
+import type { AgentQuestion } from '../types';
+
 export const TILE_SIZE = 16;
 
 export interface Character {
@@ -22,6 +24,7 @@ export interface AgentCharacter extends Character {
   toolInput?: string;  // File path, command, or pattern being operated on
   currentFile?: string;  // Project-relative path of the agent's current file (read/write)
   waitingForInput?: boolean;
+  question?: AgentQuestion;  // Real question the agent is asking (from AskUserQuestion)
   isIdle?: boolean;
   lastActivity: number;
   lastSeen: number;  // When agent was last seen in server's list (for grace period removal)

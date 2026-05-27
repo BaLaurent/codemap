@@ -2,12 +2,14 @@
 import { AgentCharacter } from './types';
 import { CHARACTER_PALETTES, SKIN, OUTLINE } from './palette';
 import { getAgentName } from '../utils/agent-names';
-import { bubbleSecondaryText } from '../utils/agent-bubble';
+import { bubbleSecondaryText, bubbleStuckLines, type BubbleLine } from '../utils/agent-bubble';
 
 // Draw a single agent character with animations
 export const drawAgentCharacter = (ctx: CanvasRenderingContext2D, char: AgentCharacter) => {
   const cx = char.x;
-  const jumpOffset = char.waitingForInput ? Math.abs(Math.sin(char.frame * 0.15)) * 8 : 0;
+  // Gentle hover while waiting — enough to draw the eye, calm enough that the
+  // question bubble stays readable (the old abs(sin)*8 hopped too frantically).
+  const jumpOffset = char.waitingForInput ? Math.sin(char.frame * 0.1) * 3 : 0;
   const cy = char.y - jumpOffset;
   const palette = CHARACTER_PALETTES[char.colorIndex % CHARACTER_PALETTES.length];
   const scale = 1.5;
@@ -255,24 +257,36 @@ export const drawAgentCharacter = (ctx: CanvasRenderingContext2D, char: AgentCha
       }
     }
 
-    // Primary text (tool name or stuck message) with optional duration
-    const primaryText = isStuck ? "Hey! I'm stuck!" : char.currentCommand! + durationStr;
-    // Secondary text: for file commands show the agent's actual current file
-    // (same source as its movement), otherwise the tool input (command/pattern).
-    const secondaryText = isStuck
-      ? null
-      : bubbleSecondaryText(char.currentCommand, char.currentFile, char.toolInput);
+    // Build the bubble's lines. When stuck, the question wraps across several
+    // lines (growing height, not width); otherwise the bold tool name plus an
+    // optional secondary line (current file for file commands, else tool input).
+    let lines: BubbleLine[];
+    if (isStuck) {
+      lines = bubbleStuckLines(char.question);
+    } else {
+      lines = [{ text: char.currentCommand! + durationStr, bold: true }];
+      const secondaryText = bubbleSecondaryText(char.currentCommand, char.currentFile, char.toolInput);
+      if (secondaryText) lines.push({ text: secondaryText, bold: false });
+    }
 
-    ctx.font = 'bold 10px monospace';
-    const primaryWidth = ctx.measureText(primaryText).width;
-    ctx.font = '9px monospace';
-    const secondaryWidth = secondaryText ? ctx.measureText(secondaryText).width : 0;
-
+    // Each line carries its own font size (the question shrinks when long).
+    // Width fits the widest line; height is the sum of per-line heights, with
+    // the tail kept anchored at the same bottom as a single-line bubble.
     const bubblePadX = 8;
-    const bubbleW = Math.max(primaryWidth, secondaryWidth) + bubblePadX * 2;
-    const bubbleH = secondaryText ? 28 : 18;  // Taller for two lines
+    const lineSize = (line: BubbleLine) => line.size ?? (line.bold ? 10 : 9);
+    const lineFont = (line: BubbleLine) => `${line.bold ? 'bold ' : ''}${lineSize(line)}px monospace`;
+    let maxLineWidth = 0;
+    let bubbleH = 6;  // top + bottom padding
+    for (const line of lines) {
+      ctx.font = lineFont(line);
+      maxLineWidth = Math.max(maxLineWidth, ctx.measureText(line.text).width);
+      bubbleH += lineSize(line) + 2;
+    }
+    const bubbleW = maxLineWidth + bubblePadX * 2;  // 1 line of 10px → H 18, matching old
     const bubbleX = cx - bubbleW / 2;
-    const bubbleY = cy - (secondaryText ? 95 : 85) - jumpOffset;
+    // cy already includes jumpOffset, so the bubble tracks the character 1:1
+    // (it used to subtract jumpOffset again here, making the bubble jump double).
+    const bubbleY = cy - 85 - (bubbleH - 18);
     const tailSize = 6;
 
     // Shadow
@@ -310,17 +324,16 @@ export const drawAgentCharacter = (ctx: CanvasRenderingContext2D, char: AgentCha
     ctx.fillStyle = bubbleColor;
     ctx.fillRect(cx - tailSize / 2 + 1, bubbleY + bubbleH - 1, tailSize - 2, 2);
 
-    // Primary text (tool name)
-    ctx.font = 'bold 10px monospace';
-    ctx.fillStyle = textColor;
+    // Text lines, top to bottom; baseline advances by each line's own size.
     ctx.textAlign = 'center';
-    ctx.fillText(primaryText, cx, bubbleY + (secondaryText ? 11 : 13));
-
-    // Secondary text (tool input) if present
-    if (secondaryText) {
-      ctx.font = '9px monospace';
-      ctx.fillStyle = secondaryColor;
-      ctx.fillText(secondaryText, cx, bubbleY + 23);
+    let textY = bubbleY + 4;
+    for (const line of lines) {
+      const size = lineSize(line);
+      textY += size;
+      ctx.font = lineFont(line);
+      ctx.fillStyle = line.bold ? textColor : secondaryColor;
+      ctx.fillText(line.text, cx, textY);
+      textY += 2;
     }
   }
 };

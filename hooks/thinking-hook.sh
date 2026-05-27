@@ -63,6 +63,19 @@ MODEL=$(echo "$INPUT" | /usr/bin/jq -r '.model // empty' 2>/dev/null)
 # Extract duration if available (Cursor afterShellExecution, afterMCPExecution)
 DURATION=$(echo "$INPUT" | /usr/bin/jq -r '.duration // .duration_ms // empty' 2>/dev/null)
 
+# For AskUserQuestion, capture the real question + option labels so the hotel can
+# show it instead of the generic "stuck" bubble. jq emits valid JSON itself, so
+# no manual escaping is needed here.
+QUESTION_JSON=""
+if [ "$TOOL_NAME" = "AskUserQuestion" ]; then
+    QUESTION_JSON=$(echo "$INPUT" | /usr/bin/jq -c '
+        (.tool_input.questions // [])[0] as $q
+        | if $q == null then empty
+          else { question: ($q.question // ""),
+                 options: [ ($q.options // [])[] | (.label // .) ] }
+          end' 2>/dev/null)
+fi
+
 # Detect source for logging (optional)
 SOURCE="unknown"
 echo "$INPUT" | /usr/bin/jq -e '.session_id' >/dev/null 2>&1 && SOURCE="claude"
@@ -84,6 +97,10 @@ if [ -n "$TOOL_INPUT" ]; then
     # Escape special characters in tool input for JSON
     ESCAPED_INPUT=$(echo "$TOOL_INPUT" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | tr -d '\n')
     JSON_PAYLOAD="$JSON_PAYLOAD,\"toolInput\":\"$ESCAPED_INPUT\""
+fi
+if [ -n "$QUESTION_JSON" ]; then
+    # QUESTION_JSON is already valid JSON (built by jq), so embed it as-is.
+    JSON_PAYLOAD="$JSON_PAYLOAD,\"question\":$QUESTION_JSON"
 fi
 if [ -n "$AGENT_TYPE" ]; then
     JSON_PAYLOAD="$JSON_PAYLOAD,\"agentType\":\"$AGENT_TYPE\""

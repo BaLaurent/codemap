@@ -21,6 +21,12 @@ export interface ThinkingEvent {
 /** Agent status from stop events */
 export type AgentStatus = 'completed' | 'aborted' | 'error';
 
+/** A question an agent is asking the user (from the AskUserQuestion tool) */
+export interface AgentQuestion {
+  question: string;     // The question text
+  options?: string[];   // Option labels the user can choose from
+}
+
 export interface AgentThinkingState {
   agentId: string;
   projectId?: string;  // Which building/project this agent belongs to
@@ -33,6 +39,7 @@ export interface AgentThinkingState {
                          // Authoritative source for the agent's floor, movement target,
                          // and bubble file line. Sticky across non-file commands.
   waitingForInput?: boolean;  // True when agent is waiting for user input
+  question?: AgentQuestion;  // Real question the agent is asking (from AskUserQuestion)
   agentType?: string;  // Agent type (Plan, Explore, Bash, etc.)
   model?: string;  // Model name (e.g., "claude-3.5-sonnet")
   lastDuration?: number;  // Last operation duration in ms

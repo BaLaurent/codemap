@@ -30,6 +30,16 @@ export interface FileActivityEvent {
 /** Agent status from stop events */
 export type AgentStatus = 'completed' | 'aborted' | 'error';
 
+/**
+ * A question an agent is asking the user (from the AskUserQuestion tool).
+ * Captured by the hook from tool_input.questions[0] so the hotel can show the
+ * real question instead of a generic "stuck" bubble.
+ */
+export interface AgentQuestion {
+  question: string;     // The question text
+  options?: string[];   // Option labels the user can choose from
+}
+
 export interface ThinkingEvent {
   type: 'thinking-start' | 'thinking-end' | 'agent-stop';
   agentId: string;
@@ -40,6 +50,7 @@ export interface ThinkingEvent {
   timestamp: number;
   toolName?: string;  // Current tool being used (e.g., "Read", "Edit", "Bash")
   toolInput?: string;  // Abbreviated tool input (file path, command, pattern)
+  question?: AgentQuestion;  // Full question text + options (from AskUserQuestion tool_input)
   agentType?: string;  // Agent type from SessionStart (e.g., "Plan", "Explore", "Bash")
   model?: string;  // Model name (e.g., "claude-3.5-sonnet") - Cursor provides this
   duration?: number;  // Operation duration in ms - from afterShellExecution/afterMCPExecution
@@ -61,6 +72,7 @@ export interface AgentThinkingState {
                          // derives its floor, movement target, and bubble file line from it.
                          // Sticky across non-file commands (e.g. Bash) so the agent stays put.
   waitingForInput?: boolean;  // True when agent is waiting for user input
+  question?: AgentQuestion;  // Real question the agent is asking (from AskUserQuestion)
   pendingToolStart?: number;  // Timestamp when tool started (for detecting stuck permission prompts)
   agentType?: string;  // Agent type (e.g., "Plan", "Explore", "Bash") - shown in display name
   model?: string;  // Model name (e.g., "claude-3.5-sonnet") - shown below agent name

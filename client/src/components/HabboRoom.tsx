@@ -118,9 +118,11 @@ export function HabboRoom({ projectId, focusRequest }: { projectId?: string; foc
   const lastDragPosRef = useRef({ x: 0, y: 0 });
   const keysDownRef = useRef<Set<string>>(new Set());
 
-  // Agent tracking mode - follow a specific agent at full zoom
+  // Agent tracking mode - follow a specific agent
   const trackedAgentIdRef = useRef<string | null>(null);
-  const trackingZoom = 3; // Zoom level when tracking
+  const trackingZoom = 2; // Zoom snapped to on selection; the user can then freely zoom in/out
+  const trackingZoomDoneRef = useRef(false); // One-shot: stop forcing zoom once snapped
+  const lastTrackedRef = useRef<string | null>(null); // Detects selection changes to re-arm the snap
   const baseOffsetsRef = useRef({ x: 0, y: 0 }); // Store base offsets for coordinate conversion
 
   // Externally requested focus (from the agent roster panel). Held until the
@@ -518,6 +520,7 @@ export function HabboRoom({ projectId, focusRequest }: { projectId?: string; foc
           if (existing) {
             existing.currentCommand = agent.currentCommand;
             existing.toolInput = agent.toolInput;
+            existing.question = agent.question;
             existing.currentFile = agent.currentFile;
             existing.displayName = agent.displayName;
             existing.lastActivity = agent.lastActivity;
@@ -576,6 +579,7 @@ export function HabboRoom({ projectId, focusRequest }: { projectId?: string; foc
               colorIndex,
               currentCommand: agent.currentCommand,
               toolInput: agent.toolInput,
+              question: agent.question,
               currentFile: agent.currentFile,
               waitingForInput: agent.waitingForInput ?? false,
               lastActivity: agent.lastActivity,
@@ -941,12 +945,22 @@ export function HabboRoom({ projectId, focusRequest }: { projectId?: string; foc
         if (trackedAgentIdRef.current) {
           const trackedAgent = agentCharactersRef.current.get(trackedAgentIdRef.current);
           if (trackedAgent) {
-            // Smoothly transition to tracking zoom
-            const zoomDiff = trackingZoom - zoomRef.current;
-            if (Math.abs(zoomDiff) > 0.01) {
-              zoomRef.current += zoomDiff * 0.1;
-            } else {
-              zoomRef.current = trackingZoom;
+            // A newly selected agent re-arms the one-shot zoom snap.
+            if (lastTrackedRef.current !== trackedAgentIdRef.current) {
+              lastTrackedRef.current = trackedAgentIdRef.current;
+              trackingZoomDoneRef.current = false;
+            }
+
+            // Snap zoom toward trackingZoom ONCE; afterwards the user is free to
+            // zoom in/out (wheel/keys set trackingZoomDoneRef to take control).
+            if (!trackingZoomDoneRef.current) {
+              const zoomDiff = trackingZoom - zoomRef.current;
+              if (Math.abs(zoomDiff) > 0.01) {
+                zoomRef.current += zoomDiff * 0.1;
+              } else {
+                zoomRef.current = trackingZoom;
+                trackingZoomDoneRef.current = true;
+              }
             }
 
             // To center agent on screen, we need:
@@ -964,6 +978,8 @@ export function HabboRoom({ projectId, focusRequest }: { projectId?: string; foc
             // Tracked agent no longer exists, exit tracking mode
             trackedAgentIdRef.current = null;
           }
+        } else {
+          lastTrackedRef.current = null;
         }
 
         ctx.save();
@@ -1182,6 +1198,8 @@ export function HabboRoom({ projectId, focusRequest }: { projectId?: string; foc
       const newZoom = Math.max(0.5, Math.min(4, oldZoom + delta));
 
       if (newZoom !== oldZoom) {
+        // Manual zoom takes control: stop the tracking snap from overriding it.
+        trackingZoomDoneRef.current = true;
         const rect = canvas.getBoundingClientRect();
         const mouseX = e.clientX - rect.left;
         const mouseY = e.clientY - rect.top;
@@ -1207,9 +1225,11 @@ export function HabboRoom({ projectId, focusRequest }: { projectId?: string; foc
       // Zoom with Cmd/Ctrl + / -
       if ((e.metaKey || e.ctrlKey) && (e.key === '=' || e.key === '+')) {
         e.preventDefault();
+        trackingZoomDoneRef.current = true; // manual zoom takes control
         zoomRef.current = Math.min(4, zoomRef.current + 0.25);
       } else if ((e.metaKey || e.ctrlKey) && e.key === '-') {
         e.preventDefault();
+        trackingZoomDoneRef.current = true; // manual zoom takes control
         zoomRef.current = Math.max(0.5, zoomRef.current - 0.25);
       } else if ((e.metaKey || e.ctrlKey) && e.key === '0') {
         e.preventDefault();
