@@ -56,6 +56,10 @@ export interface AgentThinkingState {
   displayName: string;
   currentCommand?: string;  // Current tool/command being executed
   toolInput?: string;  // Abbreviated tool input (file path, command, pattern)
+  currentFile?: string;  // Project-relative path of the agent's current file (read/write).
+                         // Single source of truth for the agent's location: the client
+                         // derives its floor, movement target, and bubble file line from it.
+                         // Sticky across non-file commands (e.g. Bash) so the agent stays put.
   waitingForInput?: boolean;  // True when agent is waiting for user input
   pendingToolStart?: number;  // Timestamp when tool started (for detecting stuck permission prompts)
   agentType?: string;  // Agent type (e.g., "Plan", "Explore", "Bash") - shown in display name

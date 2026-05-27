@@ -518,6 +518,7 @@ export function HabboRoom({ projectId, focusRequest }: { projectId?: string; foc
           if (existing) {
             existing.currentCommand = agent.currentCommand;
             existing.toolInput = agent.toolInput;
+            existing.currentFile = agent.currentFile;
             existing.displayName = agent.displayName;
             existing.lastActivity = agent.lastActivity;
             existing.lastSeen = now;  // Mark as seen
@@ -575,6 +576,7 @@ export function HabboRoom({ projectId, focusRequest }: { projectId?: string; foc
               colorIndex,
               currentCommand: agent.currentCommand,
               toolInput: agent.toolInput,
+              currentFile: agent.currentFile,
               waitingForInput: agent.waitingForInput ?? false,
               lastActivity: agent.lastActivity,
               lastSeen: now,
@@ -585,6 +587,17 @@ export function HabboRoom({ projectId, focusRequest }: { projectId?: string; foc
               status: agent.status,
               statusTimestamp: agent.statusTimestamp,
             });
+          }
+        }
+
+        // Seed each located agent's floor from its server-authoritative currentFile.
+        // agentFloorsRef is a pure projection of currentFile, so selecting an agent
+        // (roster/focus) jumps to the right floor even right after mount, before any
+        // live activity arrives. Bash-only agents (no currentFile) keep no entry and
+        // stay on the current floor when selected — the best we can know about them.
+        for (const agent of validAgents) {
+          if (agent.currentFile) {
+            nav.agentFloorsRef.current.set(agent.agentId, findFloorForFile(agent.currentFile));
           }
         }
 
@@ -724,13 +737,19 @@ export function HabboRoom({ projectId, focusRequest }: { projectId?: string; foc
             // we compute this agent's target below.
             ensureLayoutForCurrentFloor();
 
-            // Use same matching logic as screen flash for consistency
-            // This ensures agent goes to same desk that lights up
+            // Resolve the desk AGAINST the floor we just rebuilt. follow mode may
+            // have switched floors right above, so the matchingFileId computed
+            // earlier (against the previous floor) can be stale — reusing it would
+            // miss and drop the agent at the room centre via the folder fallback.
+            // Recomputing here lets the agent reach the exact desk cross-floor.
             let filePos: { x: number; y: number } | undefined;
 
-            // First try to find the exact file using priority-based matching
-            if (matchingFileId) {
-              filePos = filePositionsRef.current.get(matchingFileId);
+            const targetFileId = findMatchingFileId(
+              recentActivity.filePath,
+              Array.from(filePositionsRef.current.keys())
+            );
+            if (targetFileId) {
+              filePos = filePositionsRef.current.get(targetFileId);
             }
 
             // Fall back to folder-based routing if file not in layout
@@ -1341,16 +1360,7 @@ export function HabboRoom({ projectId, focusRequest }: { projectId?: string; foc
             ? thinkingAgentsRef.current.find(a => a.agentId === nav.state.focusAgentId)?.displayName
             : undefined
         }
-        agentsElsewhere={Array.from(nav.agentFloorsRef.current.entries())
-          .filter(([, f]) => f !== nav.state.currentFloorIndex)
-          .map(([agentId, floor]) => ({
-            agentId,
-            name: thinkingAgentsRef.current.find(a => a.agentId === agentId)?.displayName || `Agent ${agentId.slice(0, 6)}`,
-            floor,
-          }))}
-        onCycleAgent={nav.cycleAgent}
         onSelectFloor={nav.selectFloor}
-        onSelectAgent={nav.selectAgent}
       />
       <canvas
         ref={canvasRef}

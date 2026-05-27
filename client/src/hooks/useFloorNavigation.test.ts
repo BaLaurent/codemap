@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { reduceNav, nextCycleId, INITIAL_NAV_STATE, NavState } from './useFloorNavigation';
+import { reduceNav, INITIAL_NAV_STATE, NavState } from './useFloorNavigation';
 
 const base = INITIAL_NAV_STATE;
 
@@ -77,37 +77,5 @@ describe('reduceNav', () => {
     expect(next.focusAgentId).toBe('b');
     expect(next.follow).toBe(true);
     expect(next.currentFloorIndex).toBe(5);
-  });
-});
-
-describe('nextCycleId', () => {
-  it('returns null for an empty list', () => {
-    expect(nextCycleId([], null, 1)).toBeNull();
-    expect(nextCycleId([], 'a', -1)).toBeNull();
-  });
-
-  it('returns the single agent in both directions', () => {
-    expect(nextCycleId(['a'], 'a', 1)).toBe('a');
-    expect(nextCycleId(['a'], 'a', -1)).toBe('a');
-  });
-
-  it('wraps forward from last to first', () => {
-    expect(nextCycleId(['a', 'b', 'c'], 'c', 1)).toBe('a');
-  });
-
-  it('wraps backward from first to last', () => {
-    expect(nextCycleId(['a', 'b', 'c'], 'a', -1)).toBe('c');
-  });
-
-  it('current=null with dir=1 yields first', () => {
-    expect(nextCycleId(['a', 'b', 'c'], null, 1)).toBe('a');
-  });
-
-  it('current=null with dir=-1 yields last', () => {
-    expect(nextCycleId(['a', 'b', 'c'], null, -1)).toBe('c');
-  });
-
-  it('unknown current with dir=1 yields first', () => {
-    expect(nextCycleId(['a', 'b', 'c'], 'z', 1)).toBe('a');
   });
 });

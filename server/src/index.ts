@@ -9,6 +9,7 @@ import { ProjectRegistry } from './project-registry.js';
 import { deriveProjectFromPath } from './project-identity.js';
 import { getHotFolders, clearCache as clearGitCache } from './git-activity.js';
 import { FileActivityEvent, ThinkingEvent, AgentThinkingState } from './types.js';
+import { fileFromActivityEvent } from './agent-file.js';
 
 const PORT = 5174; // Fixed port - never change
 
@@ -300,6 +301,14 @@ app.post('/api/activity', (req, res) => {
         // Keep command visible but mark as not actively thinking
         state.isThinking = false;
       }
+
+      // Record the agent's current file (relative). Search events are not files;
+      // they leave currentFile sticky so the agent stays at its last real file.
+      const relFile = fileFromActivityEvent(
+        event.type,
+        registry.toRelativePath(projectId, event.filePath)
+      );
+      if (relFile) state.currentFile = relFile;
 
       refreshAgentCounts();
       // Always broadcast agent state on activity to keep client in sync

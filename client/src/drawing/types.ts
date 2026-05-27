@@ -20,6 +20,7 @@ export interface AgentCharacter extends Character {
   colorIndex: number;
   currentCommand?: string;
   toolInput?: string;  // File path, command, or pattern being operated on
+  currentFile?: string;  // Project-relative path of the agent's current file (read/write)
   waitingForInput?: boolean;
   isIdle?: boolean;
   lastActivity: number;

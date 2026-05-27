@@ -29,6 +29,9 @@ export interface AgentThinkingState {
   displayName: string;
   currentCommand?: string;  // Current tool/command being executed
   toolInput?: string;  // Abbreviated tool input (file path, command, pattern)
+  currentFile?: string;  // Project-relative path of the agent's current file (read/write).
+                         // Authoritative source for the agent's floor, movement target,
+                         // and bubble file line. Sticky across non-file commands.
   waitingForInput?: boolean;  // True when agent is waiting for user input
   agentType?: string;  // Agent type (Plan, Explore, Bash, etc.)
   model?: string;  // Model name (e.g., "claude-3.5-sonnet")

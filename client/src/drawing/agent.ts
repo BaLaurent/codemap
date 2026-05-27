@@ -2,6 +2,7 @@
 import { AgentCharacter } from './types';
 import { CHARACTER_PALETTES, SKIN, OUTLINE } from './palette';
 import { getAgentName } from '../utils/agent-names';
+import { bubbleSecondaryText } from '../utils/agent-bubble';
 
 // Draw a single agent character with animations
 export const drawAgentCharacter = (ctx: CanvasRenderingContext2D, char: AgentCharacter) => {
@@ -256,8 +257,11 @@ export const drawAgentCharacter = (ctx: CanvasRenderingContext2D, char: AgentCha
 
     // Primary text (tool name or stuck message) with optional duration
     const primaryText = isStuck ? "Hey! I'm stuck!" : char.currentCommand! + durationStr;
-    // Secondary text (tool input - file, command, pattern)
-    const secondaryText = !isStuck && char.toolInput ? char.toolInput : null;
+    // Secondary text: for file commands show the agent's actual current file
+    // (same source as its movement), otherwise the tool input (command/pattern).
+    const secondaryText = isStuck
+      ? null
+      : bubbleSecondaryText(char.currentCommand, char.currentFile, char.toolInput);
 
     ctx.font = 'bold 10px monospace';
     const primaryWidth = ctx.measureText(primaryText).width;

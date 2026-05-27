@@ -17,14 +17,6 @@ export type NavAction =
 
 export const INITIAL_NAV_STATE: NavState = { currentFloorIndex: 0, focusAgentId: null, follow: false };
 
-// Returns the id to focus next when cycling; null if there are none.
-export function nextCycleId(ids: string[], current: string | null, dir: 1 | -1): string | null {
-  if (ids.length === 0) return null;
-  if (current === null) return dir === 1 ? ids[0] : ids[ids.length - 1];
-  const i = ids.indexOf(current);
-  return ids[(i + dir + ids.length) % ids.length];
-}
-
 // agentFloors: agentId -> floor of that agent's current file (post-update).
 export function reduceNav(
   state: NavState,
@@ -73,7 +65,6 @@ export interface FloorNavigation {
   agentFloorsRef: MutableRefObject<Map<string, number>>;
   noteAgentActivity: (agentId: string, floor: number) => void;
   selectAgent: (agentId: string) => void;
-  cycleAgent: (dir: 1 | -1) => void;
   selectFloor: (floor: number) => void;
   removeAgent: (agentId: string) => void;
 }
@@ -102,12 +93,6 @@ export function useFloorNavigation(): FloorNavigation {
     dispatch({ kind: 'selectAgent', agentId });
   }, [dispatch]);
 
-  const cycleAgent = useCallback((dir: 1 | -1) => {
-    const ids = Array.from(agentFloorsRef.current.keys());
-    const nextId = nextCycleId(ids, snapshotRef.current.focusAgentId, dir);
-    if (nextId !== null) dispatch({ kind: 'selectAgent', agentId: nextId });
-  }, [dispatch]);
-
   const selectFloor = useCallback((floor: number) => {
     dispatch({ kind: 'selectFloor', floor });
   }, [dispatch]);
@@ -119,6 +104,6 @@ export function useFloorNavigation(): FloorNavigation {
 
   return {
     state, snapshotRef, agentFloorsRef,
-    noteAgentActivity, selectAgent, cycleAgent, selectFloor, removeAgent,
+    noteAgentActivity, selectAgent, selectFloor, removeAgent,
   };
 }

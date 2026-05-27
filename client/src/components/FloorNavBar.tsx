@@ -1,5 +1,6 @@
 // DOM navigation bar for the single-floor hotel view.
-import type { CSSProperties } from 'react';
+import { useEffect, useReducer, type CSSProperties } from 'react';
+import { getAgentName, AGENT_NAMES_CHANGED } from '../utils/agent-names';
 
 interface FloorNavBarProps {
   currentFloor: number;
@@ -7,10 +8,7 @@ interface FloorNavBarProps {
   follow: boolean;
   focusAgentId: string | null;
   focusAgentName?: string;
-  agentsElsewhere: { agentId: string; name: string; floor: number }[];
-  onCycleAgent: (dir: 1 | -1) => void;
   onSelectFloor: (floor: number) => void;
-  onSelectAgent: (agentId: string) => void;
 }
 
 const panel: CSSProperties = {
@@ -34,20 +32,32 @@ const floorBtn = (disabled: boolean): CSSProperties => ({
 });
 
 export function FloorNavBar({
-  currentFloor, availableFloors, follow, focusAgentId, focusAgentName, agentsElsewhere,
-  onCycleAgent, onSelectFloor, onSelectAgent,
+  currentFloor, availableFloors, follow, focusAgentId, focusAgentName,
+  onSelectFloor,
 }: FloorNavBarProps) {
   // Step only among floors that actually exist (availableFloors, sorted ascending).
   const prevFloor = availableFloors.filter(f => f < currentFloor).at(-1);
   const nextFloor = availableFloors.find(f => f > currentFloor);
 
+  // The focused agent's name may be a user-assigned custom name (renamed in the
+  // roster). That lives in the agent-names store, not in React state, so resolve
+  // it via getAgentName and re-render on AGENT_NAMES_CHANGED — otherwise the bar
+  // would keep showing the server default after a rename. focusAgentName is the
+  // server-assigned fallback.
+  const [, bumpName] = useReducer((n: number) => n + 1, 0);
+  useEffect(() => {
+    window.addEventListener(AGENT_NAMES_CHANGED, bumpName);
+    return () => window.removeEventListener(AGENT_NAMES_CHANGED, bumpName);
+  }, []);
+  const displayedName = focusAgentId
+    ? getAgentName(focusAgentId, focusAgentName ?? `Agent ${focusAgentId.slice(0, 6)}`)
+    : 'No agent';
+
   return (
     <div style={panel}>
-      <button style={btn} onClick={() => onCycleAgent(-1)} title="Previous agent">◀</button>
-      <span style={{ fontWeight: 600 }}>
-        {focusAgentName ?? (focusAgentId ? `Agent ${focusAgentId.slice(0, 6)}` : 'No agent')}
+      <span style={{ fontWeight: 600 }} title="Focused agent (pick another from the roster)">
+        {displayedName}
       </span>
-      <button style={btn} onClick={() => onCycleAgent(1)} title="Next agent">▶</button>
 
       <span style={{ opacity: 0.4 }} aria-hidden="true">|</span>
 
@@ -66,17 +76,6 @@ export function FloorNavBar({
         disabled={nextFloor === undefined}
         title="Floor up"
       >▲</button>
-
-      {agentsElsewhere.map(a => (
-        <button
-          key={a.agentId}
-          style={{ ...btn, background: 'rgba(59,130,246,0.25)' }}
-          onClick={() => onSelectAgent(a.agentId)}
-          title="Jump to this agent"
-        >
-          {a.name} · floor {a.floor} ▸
-        </button>
-      ))}
     </div>
   );
 }
