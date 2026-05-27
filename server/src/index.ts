@@ -8,8 +8,9 @@ import os from 'os';
 import { ProjectRegistry } from './project-registry.js';
 import { deriveProjectFromPath } from './project-identity.js';
 import { getHotFolders, clearCache as clearGitCache } from './git-activity.js';
-import { FileActivityEvent, ThinkingEvent, AgentThinkingState } from './types.js';
+import { FileActivityEvent, ThinkingEvent, AgentThinkingState, InteractionOutcome } from './types.js';
 import { fileFromActivityEvent } from './agent-file.js';
+import { registerRequest, awaitDecision, resolveRequest } from './pending-requests.js';
 
 const PORT = 5174; // Fixed port - never change
 
@@ -448,6 +449,72 @@ app.post('/api/thinking', (req, res) => {
 // Get all agent thinking states
 app.get('/api/thinking', (_req, res) => {
   res.json(getAgentStatesArray());
+});
+
+// --- Interactive answers / permissions (Phase B) ---------------------------
+// A blocking hook registers a pending interaction here, then long-polls
+// /pending-permission for the user's decision made in the hotel.
+
+// Hook registers a request. Fast-defer (204) when nobody is watching the hotel,
+// so terminals never freeze waiting on an answer no one can give.
+app.post('/api/agent/:agentId/permission-request', (req, res) => {
+  const { agentId } = req.params;
+  if (!isValidAgentId(agentId)) {
+    res.status(400).json({ error: 'invalid agentId' });
+    return;
+  }
+  if (wsManager.getClientCount() === 0) {
+    res.status(204).end();   // no client → hook defers to the terminal's native prompt
+    return;
+  }
+  const requestId: string | undefined = req.body?.requestId;
+  if (!requestId) {
+    res.status(400).json({ error: 'requestId required' });
+    return;
+  }
+  const kind: 'question' | 'permission' = req.body?.kind === 'permission' ? 'permission' : 'question';
+  const toolName: string | undefined = req.body?.toolName;
+  const toolInput: string | undefined = req.body?.toolInput;
+  registerRequest(agentId, requestId);
+  // Mark the agent as awaiting input so its bubble flags it immediately.
+  const state = agentStates.get(agentId);
+  if (state) {
+    state.waitingForInput = true;
+    wsManager.broadcast('thinking', getAgentStatesArray());
+  }
+  wsManager.broadcast('permission-request', { agentId, requestId, kind, toolName, toolInput });
+  res.status(200).json({ registered: true });
+});
+
+// Hook long-polls for the decision (held open up to maxWaitMs, then 'timeout').
+app.get('/api/agent/:agentId/pending-permission', async (req, res) => {
+  const { agentId } = req.params;
+  const requestId = String(req.query.requestId ?? '');
+  const maxWaitMs = Math.min(Number(req.query.maxWaitMs) || 30000, 120000);
+  const outcome = await awaitDecision(agentId, requestId, maxWaitMs);
+  res.status(200).json(outcome);
+});
+
+// Hotel sends the user's decision (answer / allow / deny), releasing the hook.
+app.post('/api/agent/:agentId/permission', (req, res) => {
+  const { agentId } = req.params;
+  const requestId: string | undefined = req.body?.requestId;
+  const outcome: InteractionOutcome | undefined = req.body?.outcome;
+  if (!requestId || !outcome) {
+    res.status(400).json({ error: 'requestId and outcome required' });
+    return;
+  }
+  const resolved = resolveRequest(agentId, requestId, outcome);
+  if (resolved) {
+    // Lift the waiting flag now that the user has decided.
+    const state = agentStates.get(agentId);
+    if (state) {
+      state.waitingForInput = false;
+      wsManager.broadcast('thinking', getAgentStatesArray());
+    }
+    wsManager.broadcast('permission-resolved', { agentId, requestId });
+  }
+  res.status(200).json({ resolved });
 });
 
 // List all known projects (buildings in the town)

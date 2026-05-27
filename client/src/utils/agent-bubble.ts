@@ -76,7 +76,9 @@ export function wrapText(text: string, maxChars: number): string[] {
 // smaller font / more lines), and append the option labels. Without a question
 // we fall back to the generic stuck message — e.g. a permission prompt by timeout.
 export function bubbleStuckLines(question: AgentQuestion | undefined): BubbleLine[] {
-  if (!question || !question.question) {
+  // The bubble summarises the first question; the modal shows them all.
+  const q = question?.questions?.[0];
+  if (!q || !q.question) {
     return [{ text: STUCK_FALLBACK, bold: true }];
   }
 
@@ -84,16 +86,17 @@ export function bubbleStuckLines(question: AgentQuestion | undefined): BubbleLin
   // text is still shown — the bubble just gets taller).
   let chosen = QUESTION_FONTS[QUESTION_FONTS.length - 1];
   for (const font of QUESTION_FONTS) {
-    if (wrapText(question.question, font.maxChars).length <= Q_MAX_LINES) {
+    if (wrapText(q.question, font.maxChars).length <= Q_MAX_LINES) {
       chosen = font;
       break;
     }
   }
 
-  const lines: BubbleLine[] = wrapText(question.question, chosen.maxChars)
+  const lines: BubbleLine[] = wrapText(q.question, chosen.maxChars)
     .map(text => ({ text, bold: true, size: chosen.size }));
-  if (question.options && question.options.length > 0) {
-    lines.push({ text: truncate(question.options.join(' / '), OPT_MAX_CHARS), bold: false });
+  const labels = q.options?.map(o => o.label).filter(Boolean) ?? [];
+  if (labels.length > 0) {
+    lines.push({ text: truncate(labels.join(' / '), OPT_MAX_CHARS), bold: false });
   }
   return lines;
 }

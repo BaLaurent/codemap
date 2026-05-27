@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback, MutableRefObject } from 'react';
-import { GraphData, FileActivityEvent, AgentThinkingState } from '../types';
+import { GraphData, FileActivityEvent, AgentThinkingState, PendingRequest } from '../types';
 
 const WS_URL = 'ws://localhost:5174/ws';
 const API_URL = 'http://localhost:5174/api';
@@ -14,7 +14,8 @@ export function shouldApplyMessage(
   message: { type: string; projectId?: string },
   watchedProjectId: string | undefined
 ): boolean {
-  if (message.type === 'thinking') return true;
+  // Agent-keyed global messages always apply (no project scoping).
+  if (message.type === 'thinking' || message.type === 'permission-request' || message.type === 'permission-resolved') return true;
   if (!watchedProjectId) return true;
   return message.projectId === watchedProjectId;
 }
@@ -39,6 +40,7 @@ export function useFileActivity(projectId?: string): {
   activityVersionRef: MutableRefObject<number>;
   thinkingVersionRef: MutableRefObject<number>;
   layoutVersionRef: MutableRefObject<number>;
+  pendingRequestsRef: MutableRefObject<Map<string, PendingRequest>>;
   connectionStatusRef: MutableRefObject<ConnectionStatus>;
   clearGraph: () => void;
 } {
@@ -51,6 +53,10 @@ export function useFileActivity(projectId?: string): {
   const activityVersionRef = useRef(0);
   const thinkingVersionRef = useRef(0);
   const layoutVersionRef = useRef(0);
+  // Agent → pending interaction (set by a blocking hook); used to render the
+  // Allow/Deny modal and route the decision back. Read at answer time, so no
+  // version counter needed.
+  const pendingRequestsRef = useRef<Map<string, PendingRequest>>(new Map());
   // Connection status for UI indicator
   const connectionStatusRef = useRef<ConnectionStatus>('connecting');
 
@@ -142,6 +148,13 @@ export function useFileActivity(projectId?: string): {
           // Git commit triggered a layout refresh
           console.log('Layout update received from server');
           layoutVersionRef.current++;
+        } else if (message.type === 'permission-request') {
+          const { agentId, requestId, kind, toolName, toolInput } =
+            message.data as { agentId: string } & PendingRequest;
+          pendingRequestsRef.current.set(agentId, { requestId, kind, toolName, toolInput });
+        } else if (message.type === 'permission-resolved') {
+          const { agentId } = message.data as { agentId: string; requestId: string };
+          pendingRequestsRef.current.delete(agentId);
         }
       } catch (err) {
         console.error('Failed to parse message:', err);
@@ -175,6 +188,7 @@ export function useFileActivity(projectId?: string): {
     activityVersionRef,
     thinkingVersionRef,
     layoutVersionRef,
+    pendingRequestsRef,
     connectionStatusRef,
     clearGraph
   };

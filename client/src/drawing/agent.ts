@@ -289,6 +289,10 @@ export const drawAgentCharacter = (ctx: CanvasRenderingContext2D, char: AgentCha
     const bubbleY = cy - 85 - (bubbleH - 18);
     const tailSize = 6;
 
+    // Record the bubble box (world space) so clicks on it count as clicking the
+    // agent — same coordinate space as char.x/char.y used by the hit-test.
+    char.bubbleBounds = { x: bubbleX, y: bubbleY, w: bubbleW, h: bubbleH };
+
     // Shadow
     ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
     ctx.beginPath();
@@ -335,5 +339,7 @@ export const drawAgentCharacter = (ctx: CanvasRenderingContext2D, char: AgentCha
       ctx.fillText(line.text, cx, textY);
       textY += 2;
     }
+  } else {
+    char.bubbleBounds = undefined;
   }
 };

@@ -30,14 +30,27 @@ export interface FileActivityEvent {
 /** Agent status from stop events */
 export type AgentStatus = 'completed' | 'aborted' | 'error';
 
+/** One selectable option of an AskUserQuestion question. */
+export interface AgentQuestionOption {
+  label: string;
+  description?: string;
+}
+
+/** One question within an AskUserQuestion call. */
+export interface AgentQuestionItem {
+  question: string;       // The question text
+  header?: string;        // Short category label
+  multiSelect?: boolean;  // Whether several options may be chosen
+  options: AgentQuestionOption[];
+}
+
 /**
- * A question an agent is asking the user (from the AskUserQuestion tool).
- * Captured by the hook from tool_input.questions[0] so the hotel can show the
- * real question instead of a generic "stuck" bubble.
+ * The full set of questions an agent is asking the user (from AskUserQuestion).
+ * Captured by the hook from tool_input.questions so the hotel can show the real
+ * question in the bubble and offer the choices in an interactive modal.
  */
 export interface AgentQuestion {
-  question: string;     // The question text
-  options?: string[];   // Option labels the user can choose from
+  questions: AgentQuestionItem[];
 }
 
 export interface ThinkingEvent {
@@ -80,6 +93,32 @@ export interface AgentThinkingState {
   status?: AgentStatus;  // Completion status (completed/aborted/error)
   statusTimestamp?: number;  // When status was set (for auto-clearing)
 }
+
+/**
+ * A pending interaction a blocking hook registered and is waiting on: the agent
+ * paused on an AskUserQuestion (or, later, a permission prompt) and the hotel
+ * can answer it. Broadcast to clients so they know which agent is answerable.
+ */
+export interface PendingRequestInfo {
+  agentId: string;
+  requestId: string;
+  kind: 'question' | 'permission';
+  toolName?: string;   // permission only: the tool awaiting approval
+  toolInput?: string;  // permission only: abbreviated input (command, file…)
+}
+
+/** Tells clients to dismiss a resolved interaction (multi-client consistency). */
+export interface PermissionResolvedInfo {
+  agentId: string;
+  requestId: string;
+}
+
+/** The decision the hotel sends back, returned to the blocking hook's long-poll. */
+export type InteractionOutcome =
+  | { outcome: 'answer'; text: string }   // AskUserQuestion answer (free-text injected to the agent)
+  | { outcome: 'allow' }                  // permission granted
+  | { outcome: 'deny'; reason?: string }  // permission denied
+  | { outcome: 'timeout' };               // nobody answered → hook defers to native flow
 
 /** A project the server is currently tracking (one building in the town) */
 export interface ProjectInfo {

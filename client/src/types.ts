@@ -21,10 +21,31 @@ export interface ThinkingEvent {
 /** Agent status from stop events */
 export type AgentStatus = 'completed' | 'aborted' | 'error';
 
-/** A question an agent is asking the user (from the AskUserQuestion tool) */
+/** One selectable option of an AskUserQuestion question. */
+export interface AgentQuestionOption {
+  label: string;
+  description?: string;
+}
+
+/** One question within an AskUserQuestion call. */
+export interface AgentQuestionItem {
+  question: string;       // The question text
+  header?: string;        // Short category label
+  multiSelect?: boolean;  // Whether several options may be chosen
+  options: AgentQuestionOption[];
+}
+
+/** The full set of questions an agent is asking the user (from AskUserQuestion). */
 export interface AgentQuestion {
-  question: string;     // The question text
-  options?: string[];   // Option labels the user can choose from
+  questions: AgentQuestionItem[];
+}
+
+/** A pending interaction a blocking hook is waiting on, tracked per agent. */
+export interface PendingRequest {
+  requestId: string;
+  kind: 'question' | 'permission';
+  toolName?: string;   // permission only
+  toolInput?: string;  // permission only
 }
 
 export interface AgentThinkingState {

@@ -25,6 +25,7 @@ export interface AgentCharacter extends Character {
   currentFile?: string;  // Project-relative path of the agent's current file (read/write)
   waitingForInput?: boolean;
   question?: AgentQuestion;  // Real question the agent is asking (from AskUserQuestion)
+  bubbleBounds?: { x: number; y: number; w: number; h: number };  // World-space bubble box for click hit-testing (set during draw)
   isIdle?: boolean;
   lastActivity: number;
   lastSeen: number;  // When agent was last seen in server's list (for grace period removal)

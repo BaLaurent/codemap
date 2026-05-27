@@ -63,16 +63,23 @@ MODEL=$(echo "$INPUT" | /usr/bin/jq -r '.model // empty' 2>/dev/null)
 # Extract duration if available (Cursor afterShellExecution, afterMCPExecution)
 DURATION=$(echo "$INPUT" | /usr/bin/jq -r '.duration // .duration_ms // empty' 2>/dev/null)
 
-# For AskUserQuestion, capture the real question + option labels so the hotel can
-# show it instead of the generic "stuck" bubble. jq emits valid JSON itself, so
-# no manual escaping is needed here.
+# For AskUserQuestion, capture the full question structure (every question, its
+# options, multiSelect flag) so the hotel can show it in the bubble and offer the
+# choices in an interactive modal. jq emits valid JSON itself, so no manual
+# escaping is needed here.
 QUESTION_JSON=""
 if [ "$TOOL_NAME" = "AskUserQuestion" ]; then
     QUESTION_JSON=$(echo "$INPUT" | /usr/bin/jq -c '
-        (.tool_input.questions // [])[0] as $q
-        | if $q == null then empty
-          else { question: ($q.question // ""),
-                 options: [ ($q.options // [])[] | (.label // .) ] }
+        (.tool_input.questions // []) as $qs
+        | if ($qs | length) == 0 then empty
+          else { questions: [ $qs[]
+              | { question: (.question // ""), multiSelect: (.multiSelect // false),
+                  options: [ (.options // [])[]
+                    | if type == "object"
+                      then ({ label: (.label // "") } + (if .description then { description: .description } else {} end))
+                      else { label: . } end ] }
+                + (if .header then { header: .header } else {} end)
+            ] }
           end' 2>/dev/null)
 fi
 

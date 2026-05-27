@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { useFileActivity } from '../hooks/useFileActivity';
 import { useFloorNavigation } from '../hooks/useFloorNavigation';
 import { FloorNavBar } from './FloorNavBar';
-import { GraphNode, FolderScore } from '../types';
+import { InteractionModal, formatAnswers, type QuestionAnswer } from './InteractionModal';
+import { GraphNode, FolderScore, type AgentQuestion } from '../types';
 import { playReadSound, playWriteSound, playWaitingSound, initAudio } from '../sounds';
 import { findMatchingFileId } from '../utils/screen-flash';
 import { resolveFocus } from '../utils/focus-resolver';
@@ -45,6 +46,7 @@ export function HabboRoom({ projectId, focusRequest }: { projectId?: string; foc
     activityVersionRef,
     thinkingVersionRef,
     layoutVersionRef,
+    pendingRequestsRef,
     connectionStatusRef
   } = useFileActivity(projectId);
 
@@ -57,6 +59,15 @@ export function HabboRoom({ projectId, focusRequest }: { projectId?: string; foc
   // activity to force a render.
   const [availableFloors, setAvailableFloors] = useState<number[]>([]);
   const availableFloorsRef = useRef<number[]>([]);
+
+  // The interaction modal target (React state, not a ref, so the DOM overlay
+  // re-renders on open/close). Snapshotted on click; it doesn't change while the
+  // agent waits. Either an AskUserQuestion answer or a tool permission.
+  type ModalTarget = { agentId: string; displayName: string; requestId?: string } & (
+    | { mode: 'question'; question: AgentQuestion }
+    | { mode: 'permission'; toolName?: string; toolInput?: string }
+  );
+  const [modalTarget, setModalTarget] = useState<ModalTarget | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const agentCharactersRef = useRef<Map<string, AgentCharacter>>(new Map());
@@ -1301,9 +1312,15 @@ export function HabboRoom({ projectId, focusRequest }: { projectId?: string; foc
       for (const [agentId, char] of agentCharactersRef.current) {
         const dx = worldX - char.x;
         const dy = worldY - (char.y - 20); // Offset for agent center (head area)
-        const dist = Math.sqrt(dx * dx + dy * dy);
+        const withinHead = Math.sqrt(dx * dx + dy * dy) < agentHitRadius;
 
-        if (dist < agentHitRadius) {
+        // Clicking the speech bubble counts as clicking the agent. bubbleBounds
+        // is recorded in the same world space during draw.
+        const b = char.bubbleBounds;
+        const withinBubble = !!b &&
+          worldX >= b.x && worldX <= b.x + b.w && worldY >= b.y && worldY <= b.y + b.h;
+
+        if (withinHead || withinBubble) {
           clickedAgentId = agentId;
           break;
         }
@@ -1312,6 +1329,21 @@ export function HabboRoom({ projectId, focusRequest }: { projectId?: string; foc
       if (clickedAgentId) {
         // Start tracking this agent
         trackedAgentIdRef.current = clickedAgentId;
+        // If it's waiting on the user, open the matching modal: a tool permission
+        // (Allow/Deny) takes priority, else an AskUserQuestion answer.
+        const char = agentCharactersRef.current.get(clickedAgentId);
+        const pending = pendingRequestsRef.current.get(clickedAgentId);
+        if (char?.waitingForInput && pending?.kind === 'permission') {
+          setModalTarget({
+            agentId: clickedAgentId, displayName: char.displayName, requestId: pending.requestId,
+            mode: 'permission', toolName: pending.toolName, toolInput: pending.toolInput,
+          });
+        } else if (char?.waitingForInput && char.question?.questions?.length) {
+          setModalTarget({
+            agentId: clickedAgentId, displayName: char.displayName, requestId: pending?.requestId,
+            mode: 'question', question: char.question,
+          });
+        }
       } else if (trackedAgentIdRef.current) {
         // Clicked elsewhere while tracking - exit tracking mode
         trackedAgentIdRef.current = null;
@@ -1357,6 +1389,20 @@ export function HabboRoom({ projectId, focusRequest }: { projectId?: string; foc
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Send the user's decision back to the waiting agent and drop the pending entry.
+  type Outcome =
+    | { outcome: 'answer'; text: string }
+    | { outcome: 'allow' }
+    | { outcome: 'deny'; reason?: string };
+  const postOutcome = (agentId: string, requestId: string, outcome: Outcome) => {
+    fetch(`${API_URL}/agent/${agentId}/permission`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requestId, outcome }),
+    }).catch(console.error);
+    pendingRequestsRef.current.delete(agentId);
+  };
+
   return (
     <div style={{ width: '100vw', height: '100vh', overflow: 'hidden', backgroundColor: '#C8E8F8' }}>
       <div style={{
@@ -1389,6 +1435,32 @@ export function HabboRoom({ projectId, focusRequest }: { projectId?: string; foc
           imageRendering: 'pixelated'
         }}
       />
+      {modalTarget && (
+        <InteractionModal
+          agentName={modalTarget.displayName}
+          mode={modalTarget.mode}
+          question={modalTarget.mode === 'question' ? modalTarget.question : undefined}
+          toolName={modalTarget.mode === 'permission' ? modalTarget.toolName : undefined}
+          toolInput={modalTarget.mode === 'permission' ? modalTarget.toolInput : undefined}
+          onClose={() => setModalTarget(null)}
+          onSubmitAnswers={(answers: QuestionAnswer[]) => {
+            // Route the answer back to the agent if a blocking hook is waiting.
+            if (modalTarget.requestId && modalTarget.mode === 'question') {
+              postOutcome(modalTarget.agentId, modalTarget.requestId, {
+                outcome: 'answer', text: formatAnswers(modalTarget.question, answers),
+              });
+            }
+            setModalTarget(null);
+          }}
+          onDecide={(allow: boolean) => {
+            if (modalTarget.requestId) {
+              postOutcome(modalTarget.agentId, modalTarget.requestId,
+                allow ? { outcome: 'allow' } : { outcome: 'deny', reason: 'Refusé via CodeMap' });
+            }
+            setModalTarget(null);
+          }}
+        />
+      )}
     </div>
   );
 }

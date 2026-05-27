@@ -22,6 +22,7 @@ const CLIENT_PORT = 5173;
 // Hook paths (absolute - works for both tools)
 const FILE_HOOK = path.join(CODEMAP_ROOT, 'hooks', 'file-activity-hook.sh');
 const THINKING_HOOK = path.join(CODEMAP_ROOT, 'hooks', 'thinking-hook.sh');
+const PERMISSION_HOOK = path.join(CODEMAP_ROOT, 'hooks', 'permission-hook.sh');
 const GIT_POST_COMMIT_HOOK = path.join(CODEMAP_ROOT, 'hooks', 'git-post-commit.sh');
 
 // Claude settings to merge
@@ -39,6 +40,12 @@ const hooksConfig = {
       {
         matcher: ".*",
         hooks: [{ type: "command", command: `${THINKING_HOOK} thinking-end` }]
+      },
+      {
+        // Blocking: lets the user answer an AskUserQuestion from the hotel.
+        // Fail-open (defers to the native prompt) when the hotel isn't watching.
+        matcher: "AskUserQuestion",
+        hooks: [{ type: "command", command: `${PERMISSION_HOOK}` }]
       }
     ],
     PostToolUse: [
@@ -60,6 +67,15 @@ const hooksConfig = {
         matcher: ".*",
         hooks: [{ type: "command", command: `${THINKING_HOOK} thinking-end` }]
       }
+    ],
+    PermissionRequest: [
+      {
+        // Fires only when Claude WOULD actually prompt for permission (so auto/
+        // bypass mode and pre-allowed tools are untouched). Lets the user
+        // Allow/Deny from the hotel; fail-open to the native dialog otherwise.
+        matcher: ".*",
+        hooks: [{ type: "command", command: `${PERMISSION_HOOK}` }]
+      }
     ]
   }
 };
@@ -71,7 +87,8 @@ const permissionsConfig = {
       `Bash(${FILE_HOOK} read:*)`,
       `Bash(${FILE_HOOK} write:*)`,
       `Bash(${THINKING_HOOK} thinking-start:*)`,
-      `Bash(${THINKING_HOOK} thinking-end:*)`
+      `Bash(${THINKING_HOOK} thinking-end:*)`,
+      `Bash(${PERMISSION_HOOK}:*)`
     ]
   }
 };
@@ -169,7 +186,7 @@ async function run() {
 // True if a hook entry belongs to CodeMap (so we can replace it idempotently).
 function isCodemapHook(entry) {
   const s = JSON.stringify(entry);
-  return s.includes('file-activity-hook') || s.includes('thinking-hook');
+  return s.includes('file-activity-hook') || s.includes('thinking-hook') || s.includes('permission-hook');
 }
 
 // Setup Claude Code hooks GLOBALLY (~/.claude/settings.json).
@@ -206,7 +223,7 @@ function setupClaudeHooks() {
   if (!settings.permissions) settings.permissions = {};
   if (!settings.permissions.allow) settings.permissions.allow = [];
   settings.permissions.allow = settings.permissions.allow.filter(
-    p => !p.includes('file-activity-hook') && !p.includes('thinking-hook')
+    p => !p.includes('file-activity-hook') && !p.includes('thinking-hook') && !p.includes('permission-hook')
   );
   settings.permissions.allow.push(...permissionsConfig.permissions.allow);
 
@@ -283,6 +300,7 @@ function setupHooks() {
   try {
     fs.chmodSync(FILE_HOOK, '755');
     fs.chmodSync(THINKING_HOOK, '755');
+    fs.chmodSync(PERMISSION_HOOK, '755');
     fs.chmodSync(GIT_POST_COMMIT_HOOK, '755');
   } catch (e) {
     // Ignore chmod errors

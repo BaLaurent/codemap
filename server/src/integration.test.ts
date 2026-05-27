@@ -315,12 +315,16 @@ describe('INTEGRATION: Debug Endpoint Data', () => {
 });
 
 describe('INTEGRATION: AskUserQuestion lifecycle', () => {
-  interface QuestionLike { question: string; options?: string[]; }
+  interface QuestionLike { questions: { question: string; options: { label: string }[] }[]; }
   interface StateLike { question?: QuestionLike; }
   interface EventLike {
     type: 'thinking-start' | 'thinking-end';
     question?: QuestionLike;
   }
+
+  const sample: QuestionLike = {
+    questions: [{ question: 'Which DB?', options: [{ label: 'Postgres' }, { label: 'MySQL' }] }],
+  };
 
   // Mirrors the /api/thinking question handling in index.ts: set when present,
   // clear when the tool completes (thinking-start).
@@ -334,22 +338,19 @@ describe('INTEGRATION: AskUserQuestion lifecycle', () => {
 
   it('stores the question when the AskUserQuestion tool starts', () => {
     const state: StateLike = {};
-    applyQuestion(state, {
-      type: 'thinking-end',
-      question: { question: 'Which DB?', options: ['Postgres', 'MySQL'] },
-    });
-    expect(state.question).toEqual({ question: 'Which DB?', options: ['Postgres', 'MySQL'] });
+    applyQuestion(state, { type: 'thinking-end', question: sample });
+    expect(state.question).toEqual(sample);
   });
 
   it('clears the question when the tool completes', () => {
-    const state: StateLike = { question: { question: 'Which DB?' } };
+    const state: StateLike = { question: sample };
     applyQuestion(state, { type: 'thinking-start' });
     expect(state.question).toBeUndefined();
   });
 
   it('keeps the question across question-less thinking-end events', () => {
-    const state: StateLike = { question: { question: 'Which DB?' } };
+    const state: StateLike = { question: sample };
     applyQuestion(state, { type: 'thinking-end' });
-    expect(state.question).toEqual({ question: 'Which DB?' });
+    expect(state.question).toEqual(sample);
   });
 });

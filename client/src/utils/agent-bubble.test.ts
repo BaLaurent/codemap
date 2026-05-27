@@ -65,21 +65,25 @@ describe('wrapText', () => {
 });
 
 describe('bubbleStuckLines', () => {
+  // Build the AgentQuestion shape concisely from a question + option labels.
+  const q = (question: string, options: string[] = []) => ({
+    questions: [{ question, options: options.map(label => ({ label })) }],
+  });
+
   it('falls back to the generic message when no question was captured', () => {
     expect(bubbleStuckLines(undefined)).toEqual([{ text: "Hey! I'm stuck!", bold: true }]);
+    expect(bubbleStuckLines({ questions: [] })).toEqual([{ text: "Hey! I'm stuck!", bold: true }]);
     // A permission prompt detected by timeout has no question text.
-    expect(bubbleStuckLines({ question: '' })).toEqual([{ text: "Hey! I'm stuck!", bold: true }]);
+    expect(bubbleStuckLines(q(''))).toEqual([{ text: "Hey! I'm stuck!", bold: true }]);
   });
 
   it('shows a short question at the largest font on one line', () => {
-    expect(bubbleStuckLines({ question: 'Which DB?' }))
-      .toEqual([{ text: 'Which DB?', bold: true, size: 10 }]);
-    expect(bubbleStuckLines({ question: 'Which DB?', options: [] }))
+    expect(bubbleStuckLines(q('Which DB?')))
       .toEqual([{ text: 'Which DB?', bold: true, size: 10 }]);
   });
 
   it('appends a non-bold options line', () => {
-    const lines = bubbleStuckLines({ question: 'Which DB?', options: ['Postgres', 'MySQL'] });
+    const lines = bubbleStuckLines(q('Which DB?', ['Postgres', 'MySQL']));
     expect(lines[0]).toEqual({ text: 'Which DB?', bold: true, size: 10 });
     expect(lines[lines.length - 1]).toEqual({ text: 'Postgres / MySQL', bold: false });
   });
@@ -88,7 +92,7 @@ describe('bubbleStuckLines', () => {
     const longQuestion =
       'Quelle approche veux-tu pour la gestion du cache des requetes vers la base de ' +
       'donnees distante, et quelle strategie d invalidation des entrees expirees du cache partage ?';
-    const lines = bubbleStuckLines({ question: longQuestion });
+    const lines = bubbleStuckLines(q(longQuestion));
     const questionLines = lines.filter(l => l.bold);
     expect(questionLines.length).toBeGreaterThan(0);
     // Adapted to a smaller font than a short question would use...
