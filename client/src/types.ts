@@ -44,16 +44,48 @@ export interface AgentQuestion {
 export interface PendingRequest {
   requestId: string;
   kind: 'question' | 'permission';
-  toolName?: string;   // permission only
-  toolInput?: string;  // permission only
+  toolName?: string;     // permission only
+  toolInput?: string;    // permission only
+  title?: string;        // permission only: SDK-rendered prompt sentence
+  description?: string;  // permission only: SDK-rendered subtitle
 }
 
-/** A chat line for a hotel-spawned agent (user turn or assistant/system reply). */
+/** A chat line for a hotel-spawned agent: user turn, assistant/system reply, or
+ *  a tool call the agent made (rendered compactly in the transcript). */
 export interface ChatMessage {
   agentId: string;
-  role: 'user' | 'assistant' | 'system';
+  role: 'user' | 'assistant' | 'system' | 'tool';
   content: string;
   timestamp: number;
+  tool?: { name: string; input?: string };  // role 'tool' only: tool name + input preview
+}
+
+/** A slash command or skill the live SDK session can run (from supportedCommands). */
+export interface SlashCommand {
+  name: string;          // command/skill name, no leading slash
+  description: string;
+  argumentHint: string;  // e.g. "<file>"
+  aliases?: string[];
+}
+
+/** A model the session can switch to (from supportedModels). */
+export interface ModelOption {
+  value: string;
+  displayName: string;
+  description: string;
+}
+
+/** A subagent type the session can run as (from supportedAgents). */
+export interface SubagentOption {
+  name: string;
+  description: string;
+}
+
+/** Terminal-like capabilities a session exposes, surfaced to the hotel UI. */
+export interface AgentCapabilities {
+  commands: SlashCommand[];
+  models: ModelOption[];
+  agents: SubagentOption[];
 }
 
 export interface AgentThinkingState {
@@ -72,6 +104,7 @@ export interface AgentThinkingState {
   spawned?: boolean;  // Launched from the hotel (chattable via the panel)
   agentType?: string;  // Agent type (Plan, Explore, Bash, etc.)
   model?: string;  // Model name (e.g., "claude-3.5-sonnet")
+  permissionMode?: string;  // Spawned agents: current permission mode
   lastDuration?: number;  // Last operation duration in ms
   status?: AgentStatus;  // Completion status (completed/aborted/error)
   statusTimestamp?: number;  // When status was set

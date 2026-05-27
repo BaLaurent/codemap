@@ -90,6 +90,7 @@ export interface AgentThinkingState {
   pendingToolStart?: number;  // Timestamp when tool started (for detecting stuck permission prompts)
   agentType?: string;  // Agent type (e.g., "Plan", "Explore", "Bash") - shown in display name
   model?: string;  // Model name (e.g., "claude-3.5-sonnet") - shown below agent name
+  permissionMode?: string;  // Spawned agents: current permission mode (default/bypassPermissions/…)
   lastDuration?: number;  // Last operation duration in ms
   status?: AgentStatus;  // Completion status (completed/aborted/error)
   statusTimestamp?: number;  // When status was set (for auto-clearing)
@@ -104,8 +105,10 @@ export interface PendingRequestInfo {
   agentId: string;
   requestId: string;
   kind: 'question' | 'permission';
-  toolName?: string;   // permission only: the tool awaiting approval
-  toolInput?: string;  // permission only: abbreviated input (command, file…)
+  toolName?: string;     // permission only: the tool awaiting approval
+  toolInput?: string;    // permission only: abbreviated input (command, file…)
+  title?: string;        // permission only: SDK-rendered prompt sentence
+  description?: string;  // permission only: SDK-rendered subtitle
 }
 
 /** Tells clients to dismiss a resolved interaction (multi-client consistency). */
@@ -120,12 +123,42 @@ export interface AgentKilledInfo {
   agentId: string;
 }
 
-/** A chat line for a hotel-spawned agent (user turn or assistant reply). */
+/** A chat line for a hotel-spawned agent: user turn, assistant reply, system
+ *  notice, or a tool call the agent made (rendered compactly in the transcript). */
 export interface ChatMessage {
   agentId: string;
-  role: 'user' | 'assistant' | 'system';
+  role: 'user' | 'assistant' | 'system' | 'tool';
   content: string;
   timestamp: number;
+  tool?: { name: string; input?: string };  // role 'tool' only: tool name + input preview
+}
+
+/** A slash command or skill the live SDK session can run (from supportedCommands). */
+export interface SlashCommand {
+  name: string;          // command/skill name, no leading slash
+  description: string;
+  argumentHint: string;  // e.g. "<file>"
+  aliases?: string[];
+}
+
+/** A model the session can switch to (from supportedModels). */
+export interface ModelOption {
+  value: string;        // model id used in API calls
+  displayName: string;
+  description: string;
+}
+
+/** A subagent type the session can run as (from supportedAgents). */
+export interface SubagentOption {
+  name: string;
+  description: string;
+}
+
+/** The terminal-like capabilities a session exposes, surfaced to the hotel UI. */
+export interface AgentCapabilities {
+  commands: SlashCommand[];
+  models: ModelOption[];
+  agents: SubagentOption[];
 }
 
 /** The decision the hotel sends back, returned to the blocking hook's long-poll. */

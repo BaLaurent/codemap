@@ -46,6 +46,20 @@ export function awaitDecision(
   });
 }
 
+// Resolve every pending request for an agent with one outcome (e.g. auto-allow
+// when the user switches the agent to bypass). Returns the resolved requestIds
+// so the caller can broadcast their resolution to clients.
+export function resolveAgentRequests(agentId: string, outcome: InteractionOutcome): string[] {
+  const prefix = `${agentId}:`;
+  const resolved: string[] = [];
+  for (const k of [...entries.keys()]) {
+    if (!k.startsWith(prefix)) continue;
+    const requestId = k.slice(prefix.length);
+    if (resolveRequest(agentId, requestId, outcome)) resolved.push(requestId);
+  }
+  return resolved;
+}
+
 // Deliver the hotel's decision. Returns false if there was no such pending request.
 export function resolveRequest(
   agentId: string,

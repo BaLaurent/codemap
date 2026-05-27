@@ -4,7 +4,8 @@ import { useFloorNavigation } from '../hooks/useFloorNavigation';
 import { FloorNavBar } from './FloorNavBar';
 import { InteractionModal, formatAnswers, type QuestionAnswer } from './InteractionModal';
 import { AgentChatPanel } from './AgentChatPanel';
-import { GraphNode, FolderScore, type AgentQuestion } from '../types';
+import { SpawnPanel, type SpawnRequest } from './SpawnPanel';
+import { GraphNode, FolderScore, type AgentQuestion, type SlashCommand, type AgentCapabilities, type GraphData, type ModelOption, type SubagentOption } from '../types';
 import { playReadSound, playWriteSound, playWaitingSound, initAudio } from '../sounds';
 import { findMatchingFileId } from '../utils/screen-flash';
 import { resolveFocus } from '../utils/focus-resolver';
@@ -73,17 +74,30 @@ export function HabboRoom({ projectId, focusRequest, actionRequest }: { projectI
   // agent waits. Either an AskUserQuestion answer or a tool permission.
   type ModalTarget = { agentId: string; displayName: string; requestId?: string } & (
     | { mode: 'question'; question: AgentQuestion }
-    | { mode: 'permission'; toolName?: string; toolInput?: string }
+    | { mode: 'permission'; toolName?: string; toolInput?: string; title?: string; description?: string }
   );
   const [modalTarget, setModalTarget] = useState<ModalTarget | null>(null);
 
   // Chat panel for a hotel-spawned agent. chatTick forces a re-render when a new
   // chat line arrives (the WS data lives in chatHistoryRef); spawn UI state below.
   const [chatAgentId, setChatAgentId] = useState<string | null>(null);
-  const [, setChatTick] = useState(0);
+  const [chatTick, setChatTick] = useState(0);
   const lastChatVersionRef = useRef(0);
+  // Permission requests already shown, so closing the modal without deciding
+  // doesn't immediately re-open it (a new tool call has a new requestId → fires).
+  const shownPermReqRef = useRef<Set<string>>(new Set());
   const [spawnOpen, setSpawnOpen] = useState(false);
-  const [spawnDraft, setSpawnDraft] = useState('');
+  // Model/subagent options for the spawn form, from the project's cached
+  // capabilities (empty on a cold start → SpawnPanel shows just "Défaut").
+  const [spawnModels, setSpawnModels] = useState<ModelOption[]>([]);
+  const [spawnAgents, setSpawnAgents] = useState<SubagentOption[]>([]);
+  // Terminal-like completion data for the open chat: "/" commands+skills (live
+  // session) and "@" files (the agent's project, which may differ from the
+  // viewed building). Held in React state — NOT read from a render-loop ref —
+  // so the popover stays in sync (see memory: habboroom-dom-data-needs-react-state).
+  const [chatCommands, setChatCommands] = useState<SlashCommand[]>([]);
+  const [chatFiles, setChatFiles] = useState<string[]>([]);
+  const [chatModels, setChatModels] = useState<ModelOption[]>([]);  // to map the agent's model value → display name
 
   // Open an agent's pending interaction modal from global state (works without
   // tracking it or even viewing its building). Reads thinkingAgentsRef (question
@@ -96,6 +110,7 @@ export function HabboRoom({ projectId, focusRequest, actionRequest }: { projectI
       setModalTarget({
         agentId, displayName: agent.displayName, requestId: pending.requestId,
         mode: 'permission', toolName: pending.toolName, toolInput: pending.toolInput,
+        title: pending.title, description: pending.description,
       });
     } else if (agent.question?.questions?.length) {
       setModalTarget({
@@ -112,6 +127,64 @@ export function HabboRoom({ projectId, focusRequest, actionRequest }: { projectI
     if (actionRequest.action === 'chat') setChatAgentId(actionRequest.agentId);
     else if (actionRequest.action === 'respond') openInteractionFor(actionRequest.agentId);
   }, [actionRequest, openInteractionFor]);
+
+  // Load completion data when a chat opens: the live session's commands/skills,
+  // and the file list for the agent's OWN project (fetched fresh, since the
+  // graph ref is scoped to the viewed building which may differ).
+  useEffect(() => {
+    if (!chatAgentId) { setChatCommands([]); setChatFiles([]); setChatModels([]); return; }
+    let cancelled = false;
+
+    fetch(`${API_URL}/agent/${chatAgentId}/capabilities`)
+      .then(r => (r.ok ? r.json() : null))
+      .then((caps: AgentCapabilities | null) => {
+        if (cancelled || !caps) return;
+        setChatCommands(caps.commands);
+        setChatModels(caps.models);
+      })
+      .catch(() => { /* no live session yet → no command completion */ });
+
+    const agentProject = thinkingAgentsRef.current.find(a => a.agentId === chatAgentId)?.projectId;
+    const q = agentProject ? `?projectId=${encodeURIComponent(agentProject)}` : '';
+    fetch(`${API_URL}/graph${q}`)
+      .then(r => r.json())
+      .then((g: GraphData) => {
+        if (cancelled) return;
+        const rootId = g.nodes.find(n => n.depth === -1)?.id ?? '';
+        const toRel = (id: string) => (id.startsWith(rootId) ? id.slice(rootId.length).replace(/^[/\\]/, '') : id);
+        setChatFiles(g.nodes.filter(n => !n.isFolder && n.depth >= 0).map(n => toRel(n.id)));
+      })
+      .catch(() => { /* graph unavailable → no file completion */ });
+
+    return () => { cancelled = true; };
+  }, [chatAgentId, thinkingAgentsRef]);
+
+  // Auto-open the permission modal for the focused chat agent when it asks (tool
+  // prompts fire often, so click-to-respond would be painful). chatTick advances
+  // on each permission-request; the shown-set guard keeps ✕ as an escape hatch.
+  useEffect(() => {
+    if (!chatAgentId || modalTarget) return;
+    const pending = pendingRequestsRef.current.get(chatAgentId);
+    if (pending?.kind === 'permission' && !shownPermReqRef.current.has(pending.requestId)) {
+      shownPermReqRef.current.add(pending.requestId);
+      openInteractionFor(chatAgentId);
+    }
+  }, [chatAgentId, chatTick, modalTarget, openInteractionFor, pendingRequestsRef]);
+
+  // Load the project's cached model/subagent options when the spawn form opens.
+  useEffect(() => {
+    if (!spawnOpen || !projectId) { setSpawnModels([]); setSpawnAgents([]); return; }
+    let cancelled = false;
+    fetch(`${API_URL}/projects/${encodeURIComponent(projectId)}/capabilities`)
+      .then(r => (r.ok ? r.json() : null))
+      .then((caps: AgentCapabilities | null) => {
+        if (cancelled || !caps) return;
+        setSpawnModels(caps.models);
+        setSpawnAgents(caps.agents);
+      })
+      .catch(() => { /* cold start → just "Défaut" */ });
+    return () => { cancelled = true; };
+  }, [spawnOpen, projectId]);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const agentCharactersRef = useRef<Map<string, AgentCharacter>>(new Map());
@@ -1505,10 +1578,10 @@ export function HabboRoom({ projectId, focusRequest, actionRequest }: { projectI
   };
 
   // Spawn a Claude agent from the hotel and open its chat; send/stop turns.
-  const spawnAgentFromHotel = (initialPrompt: string) => {
+  const spawnAgentFromHotel = (req: SpawnRequest) => {
     fetch(`${API_URL}/agent/spawn`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ initialPrompt, projectId }),
+      body: JSON.stringify({ ...req, projectId }),
     })
       .then(r => r.json())
       .then((d: { agentId?: string }) => { if (d.agentId) setChatAgentId(d.agentId); })
@@ -1522,6 +1595,18 @@ export function HabboRoom({ projectId, focusRequest, actionRequest }: { projectI
   };
   const stopChat = (agentId: string) => {
     fetch(`${API_URL}/agent/${agentId}/stop`, { method: 'POST' }).catch(console.error);
+  };
+  const setModeForAgent = (agentId: string, mode: string) => {
+    fetch(`${API_URL}/agent/${agentId}/mode`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode }),
+    }).catch(console.error);
+  };
+  const setModelForAgent = (agentId: string, model: string) => {
+    fetch(`${API_URL}/agent/${agentId}/model`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model }),
+    }).catch(console.error);
   };
 
   return (
@@ -1563,6 +1648,8 @@ export function HabboRoom({ projectId, focusRequest, actionRequest }: { projectI
           question={modalTarget.mode === 'question' ? modalTarget.question : undefined}
           toolName={modalTarget.mode === 'permission' ? modalTarget.toolName : undefined}
           toolInput={modalTarget.mode === 'permission' ? modalTarget.toolInput : undefined}
+          title={modalTarget.mode === 'permission' ? modalTarget.title : undefined}
+          description={modalTarget.mode === 'permission' ? modalTarget.description : undefined}
           onClose={() => setModalTarget(null)}
           onSubmitAnswers={(answers: QuestionAnswer[]) => {
             // Route the answer back to the agent if a blocking hook is waiting.
@@ -1586,28 +1673,12 @@ export function HabboRoom({ projectId, focusRequest, actionRequest }: { projectI
       {/* Spawn-an-agent control (bottom-left) */}
       <div style={{ position: 'absolute', left: 16, bottom: 16, zIndex: 25, fontFamily: 'monospace' }}>
         {spawnOpen ? (
-          <div style={{
-            display: 'flex', gap: 6, alignItems: 'center', background: '#FFF8E6',
-            border: '4px solid #4A3B1A', boxShadow: '6px 6px 0 rgba(0,0,0,0.35)', padding: 8,
-          }}>
-            <input
-              autoFocus
-              style={{ width: 280, boxSizing: 'border-box', padding: '6px 8px', fontFamily: 'monospace', fontSize: 13, color: '#3A2E12', background: '#fff', border: '2px solid #4A3B1A' }}
-              placeholder="Tâche pour le nouvel agent…"
-              value={spawnDraft}
-              onChange={e => setSpawnDraft(e.target.value)}
-              onKeyDown={e => {
-                if (e.key === 'Enter') {
-                  const t = spawnDraft.trim();
-                  if (t) { spawnAgentFromHotel(t); setSpawnDraft(''); setSpawnOpen(false); }
-                } else if (e.key === 'Escape') { setSpawnOpen(false); setSpawnDraft(''); }
-              }}
-            />
-            <button
-              style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: 13, padding: '6px 12px', color: '#3A2E12', background: '#FFE040', border: '3px solid #4A3B1A', boxShadow: '2px 2px 0 rgba(0,0,0,0.3)', cursor: 'pointer' }}
-              onClick={() => { const t = spawnDraft.trim(); if (t) { spawnAgentFromHotel(t); setSpawnDraft(''); setSpawnOpen(false); } }}
-            >Lancer</button>
-          </div>
+          <SpawnPanel
+            models={spawnModels}
+            agents={spawnAgents}
+            onSpawn={req => { spawnAgentFromHotel(req); setSpawnOpen(false); }}
+            onClose={() => setSpawnOpen(false)}
+          />
         ) : (
           <button
             style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: 13, padding: '8px 14px', color: '#3A2E12', background: '#FFE040', border: '3px solid #4A3B1A', boxShadow: '3px 3px 0 rgba(0,0,0,0.3)', cursor: 'pointer' }}
@@ -1622,11 +1693,19 @@ export function HabboRoom({ projectId, focusRequest, actionRequest }: { projectI
         // The runner only emits a 'system' line on crash/end, and it's terminal,
         // so a system message in last position means the session is dead.
         const dead = history.length > 0 && history[history.length - 1].role === 'system';
+        const agent = thinkingAgentsRef.current.find(a => a.agentId === chatAgentId);
         return (
           <AgentChatPanel
-            agentName={thinkingAgentsRef.current.find(a => a.agentId === chatAgentId)?.displayName || 'Agent'}
+            agentName={agent?.displayName || 'Agent'}
             messages={history}
             dead={dead}
+            commands={chatCommands}
+            files={chatFiles}
+            models={chatModels}
+            model={agent?.model}
+            mode={agent?.permissionMode}
+            onModelChange={model => setModelForAgent(chatAgentId, model)}
+            onModeChange={mode => setModeForAgent(chatAgentId, mode)}
             onSend={content => sendChat(chatAgentId, content)}
             onStop={() => { stopChat(chatAgentId); setChatAgentId(null); }}
             onClose={() => setChatAgentId(null)}

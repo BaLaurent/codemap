@@ -2,7 +2,10 @@
 // system lines streamed over WS) and lets the user send new turns. Same pixel-art
 // palette as the interaction modal.
 import { useState, useRef, useEffect, type CSSProperties } from 'react';
-import type { ChatMessage } from '../types';
+import type { ChatMessage, SlashCommand, ModelOption } from '../types';
+import { CompletionInput } from './chat-completion';
+import { PERMISSION_MODE_OPTIONS } from './permission-modes';
+import { buildModelOptions } from './model-options';
 
 const C = { ink: '#3A2E12', border: '#4A3B1A', gold: '#FFE040', cream: '#FFF8E6' };
 
@@ -24,15 +27,20 @@ const iconBtn: CSSProperties = {
   color: C.ink, fontFamily: 'monospace', fontSize: 14, padding: '0 4px',
 };
 
+const subBar: CSSProperties = {
+  display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+  padding: '4px 10px', fontSize: 11, background: '#F1E7CC', borderBottom: `2px solid ${C.border}`,
+};
+
+const modeSelect: CSSProperties = {
+  fontFamily: 'monospace', fontSize: 11, color: C.ink, background: '#fff',
+  border: `2px solid ${C.border}`, padding: '2px 4px', maxWidth: '60%',
+};
+
 const transcript: CSSProperties = { flex: 1, overflowY: 'auto', padding: 10, fontSize: 13, lineHeight: 1.4 };
 
 const inputRow: CSSProperties = {
   display: 'flex', gap: 6, padding: 8, borderTop: `4px solid ${C.border}`,
-};
-
-const textInput: CSSProperties = {
-  flex: 1, boxSizing: 'border-box', padding: '6px 8px', fontFamily: 'monospace', fontSize: 13,
-  color: C.ink, background: '#fff', border: `2px solid ${C.border}`,
 };
 
 const sendBtn: CSSProperties = {
@@ -48,19 +56,49 @@ function bubbleStyle(role: ChatMessage['role']): CSSProperties {
   if (role === 'system') {
     return { alignSelf: 'center', fontStyle: 'italic', opacity: 0.7, margin: '6px 0', fontSize: 12 };
   }
+  if (role === 'tool') {
+    // Compact monospace chip for a tool call the agent made.
+    return { alignSelf: 'flex-start', background: '#EFE6CF', border: `1px dashed ${C.border}`, padding: '2px 6px', marginBottom: 4, maxWidth: '92%', fontSize: 11, opacity: 0.85, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
+  }
   return { alignSelf: 'flex-start', background: '#fff', border: `2px solid rgba(74,59,26,0.4)`, padding: '5px 8px', marginBottom: 6, maxWidth: '85%', whiteSpace: 'pre-wrap', wordBreak: 'break-word' };
 }
 
-export function AgentChatPanel({ agentName, messages, dead, onSend, onStop, onClose }: {
+// What to show for a message: a "🔧 Tool · input" chip for tool calls, else text.
+function lineText(m: ChatMessage): string {
+  if (m.role === 'tool' && m.tool) return `🔧 ${m.tool.name}${m.tool.input ? ` · ${m.tool.input}` : ''}`;
+  return m.content;
+}
+
+export function AgentChatPanel({ agentName, messages, dead, commands, files, models, model, mode, onModelChange, onModeChange, onSend, onStop, onClose }: {
   agentName: string;
   messages: ChatMessage[];
   dead?: boolean;  // session ended/crashed → input is disabled
+  commands: SlashCommand[];  // "/" completion (commands + skills) for the live session
+  files: string[];           // "@" completion (project-relative paths)
+  models: ModelOption[];     // selectable models for the live session
+  model?: string;            // current model value ('' / undefined → CLI default)
+  mode?: string;             // current permission mode
+  onModelChange: (model: string) => void;  // switch the live session's model
+  onModeChange: (mode: string) => void;     // switch the live session's permission mode
   onSend: (content: string) => void;
   onStop: () => void;
   onClose: () => void;
 }) {
   const [draft, setDraft] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Local mirrors so a pick reflects immediately, then resyncs if the
+  // server-confirmed value (prop) changes.
+  const [localMode, setLocalMode] = useState(mode ?? 'default');
+  useEffect(() => { setLocalMode(mode ?? 'default'); }, [mode]);
+  const changeMode = (m: string) => { setLocalMode(m); onModeChange(m); };
+
+  // The agent reports model 'default' when on the default, so use that as the
+  // reset value (server maps it back to "no model" → CLI default).
+  const [localModel, setLocalModel] = useState(model || 'default');
+  useEffect(() => { setLocalModel(model || 'default'); }, [model]);
+  const changeModel = (m: string) => { setLocalModel(m); onModelChange(m); };
+  const modelOptions = buildModelOptions(models, localModel);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
@@ -84,25 +122,47 @@ export function AgentChatPanel({ agentName, messages, dead, onSend, onStop, onCl
         </span>
       </div>
 
+      <div style={subBar}>
+        <select
+          style={modeSelect}
+          value={localModel}
+          disabled={dead}
+          onChange={e => changeModel(e.target.value)}
+          title="Modèle (à chaud)"
+        >
+          {modelOptions.map(o => <option key={o.value} value={o.value}>🧠 {o.label}</option>)}
+        </select>
+        <select
+          style={modeSelect}
+          value={localMode}
+          disabled={dead}
+          onChange={e => changeMode(e.target.value)}
+          title="Mode de permission (à chaud)"
+        >
+          {PERMISSION_MODE_OPTIONS.map(o => <option key={o.value} value={o.value}>🛡 {o.label}</option>)}
+        </select>
+      </div>
+
       <div style={transcript} ref={scrollRef}>
         <div style={{ display: 'flex', flexDirection: 'column' }}>
           {messages.length === 0 && (
             <div style={{ opacity: 0.6, fontStyle: 'italic' }}>L'agent démarre…</div>
           )}
           {messages.map((m, i) => (
-            <div key={i} style={bubbleStyle(m.role)}>{m.content}</div>
+            <div key={i} style={bubbleStyle(m.role)} title={m.role === 'tool' ? m.tool?.input : undefined}>{lineText(m)}</div>
           ))}
         </div>
       </div>
 
       <div style={inputRow}>
-        <input
-          style={{ ...textInput, opacity: dead ? 0.5 : 1, cursor: dead ? 'not-allowed' : 'text' }}
-          placeholder={dead ? 'Session terminée — spawn un nouvel agent' : "Écris à l'agent…"}
+        <CompletionInput
           value={draft}
+          onChange={setDraft}
+          onSubmit={send}
+          commands={commands}
+          files={files}
           disabled={dead}
-          onChange={e => setDraft(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
+          placeholder={dead ? 'Session terminée — spawn un nouvel agent' : "Écris à l'agent… (/ commandes, @ fichiers)"}
         />
         <button
           style={{ ...sendBtn, opacity: dead ? 0.5 : 1, cursor: dead ? 'not-allowed' : 'pointer' }}

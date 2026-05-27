@@ -11,8 +11,9 @@ import { getHotFolders, clearCache as clearGitCache } from './git-activity.js';
 import { randomUUID } from 'node:crypto';
 import { FileActivityEvent, ThinkingEvent, AgentThinkingState, InteractionOutcome, ChatMessage } from './types.js';
 import { fileFromActivityEvent } from './agent-file.js';
-import { registerRequest, awaitDecision, resolveRequest } from './pending-requests.js';
-import { spawnAgent, sendMessage as runnerSendMessage, stopAgent } from './agent-runner/index.js';
+import { registerRequest, awaitDecision, resolveRequest, resolveAgentRequests } from './pending-requests.js';
+import { spawnAgent, sendMessage as runnerSendMessage, stopAgent, getAgentCapabilities, getProjectCapabilities, setMode as runnerSetMode, setModel as runnerSetModel, type PermissionRequest } from './agent-runner/index.js';
+import type { PermissionMode } from '@anthropic-ai/claude-agent-sdk';
 
 const PORT = 5174; // Fixed port - never change
 
@@ -523,16 +524,41 @@ app.post('/api/agent/:agentId/permission', (req, res) => {
 // --- Hotel-spawned agents (Phase C) ----------------------------------------
 // Spawn a Claude agent in-process and chat with it from the hotel. Its own hooks
 // report under the forced sessionId, so it shows up as a normal hotel character.
-function broadcastChat(agentId: string, role: ChatMessage['role'], content: string): void {
-  wsManager.broadcast('chat', { agentId, role, content, timestamp: Date.now() });
+function broadcastChat(agentId: string, role: ChatMessage['role'], content: string, tool?: ChatMessage['tool']): void {
+  wsManager.broadcast('chat', { agentId, role, content, timestamp: Date.now(), ...(tool ? { tool } : {}) });
+}
+
+const PERMISSION_MODES: PermissionMode[] = ['default', 'acceptEdits', 'bypassPermissions', 'plan', 'dontAsk', 'auto'];
+// Up to 10 min for a human to decide in the hotel (the 30s default in
+// pending-requests suits a terminal hook with a queued answer, not a person).
+const PERMISSION_WAIT_MS = 600000;
+
+// Bridge the SDK's canUseTool callback to the existing hotel interaction flow:
+// register the request, flag the agent as waiting, broadcast it, then await the
+// user's decision (or deny on timeout / when no client is watching).
+async function requestPermission(agentId: string, req: PermissionRequest): Promise<InteractionOutcome> {
+  if (wsManager.getClientCount() === 0) return { outcome: 'deny', reason: 'Aucun client hôtel pour décider' };
+  registerRequest(agentId, req.toolUseID);
+  const state = agentStates.get(agentId);
+  if (state) { state.waitingForInput = true; wsManager.broadcast('thinking', getAgentStatesArray()); }
+  wsManager.broadcast('permission-request', {
+    agentId, requestId: req.toolUseID, kind: 'permission',
+    toolName: req.toolName, toolInput: req.toolInput, title: req.title, description: req.description,
+  });
+  const outcome = await awaitDecision(agentId, req.toolUseID, PERMISSION_WAIT_MS);
+  if (state) { state.waitingForInput = false; wsManager.broadcast('thinking', getAgentStatesArray()); }
+  // On timeout the POST /permission handler never ran, so close any open modal.
+  if (outcome.outcome === 'timeout') wsManager.broadcast('permission-resolved', { agentId, requestId: req.toolUseID });
+  return outcome;
 }
 
 app.post('/api/agent/spawn', (req, res) => {
-  const { projectId, cwd, initialPrompt } = req.body ?? {};
+  const { projectId, cwd, initialPrompt, permissionMode, model, agent } = req.body ?? {};
   if (!initialPrompt || typeof initialPrompt !== 'string') {
     res.status(400).json({ error: 'initialPrompt required' });
     return;
   }
+  const mode: PermissionMode = PERMISSION_MODES.includes(permissionMode) ? permissionMode : 'default';
   const agentId = randomUUID();
   const workdir = typeof cwd === 'string' && cwd ? cwd : FALLBACK_PROJECT_ID;
   // Pre-register so the character appears right away; hooks then animate it.
@@ -543,14 +569,23 @@ app.post('/api/agent/spawn', (req, res) => {
   }
   if (typeof projectId === 'string') state.projectId = projectId;
   state.spawned = true;  // chattable from the roster
+  state.permissionMode = mode;  // shown in the chat header
+  if (typeof model === 'string' && model) state.model = model;
   refreshAgentCounts();
   wsManager.broadcast('thinking', getAgentStatesArray());
 
   broadcastChat(agentId, 'user', initialPrompt);
   spawnAgent(
-    { agentId, cwd: workdir, projectId: typeof projectId === 'string' ? projectId : undefined, initialPrompt },
+    {
+      agentId, cwd: workdir, projectId: typeof projectId === 'string' ? projectId : undefined,
+      initialPrompt, permissionMode: mode,
+      model: typeof model === 'string' && model ? model : undefined,
+      agent: typeof agent === 'string' && agent ? agent : undefined,
+    },
     {
       onChat: (id, role, content) => broadcastChat(id, role, content),
+      onToolUse: (id, name, input) => broadcastChat(id, 'tool', '', { name, input }),
+      onPermission: (id, request) => requestPermission(id, request),
       onError: (id, message) => {
         console.error(`[${new Date().toISOString()}] agent ${id} SDK session crashed: ${message}`);
         broadcastChat(id, 'system', "⚠️ La session a planté côté SDK et s'est arrêtée. Spawn un nouvel agent pour continuer.");
@@ -560,6 +595,22 @@ app.post('/api/agent/spawn', (req, res) => {
   );
   console.log(`[${new Date().toISOString()}] SPAWNED agent ${state.displayName} (${agentId}) in ${workdir}`);
   res.status(200).json({ agentId });
+});
+
+// Terminal-like capabilities of a live session: slash commands + skills (for the
+// chat "/" popover), available models and subagents. 404 when no session.
+app.get('/api/agent/:agentId/capabilities', async (req, res) => {
+  const { agentId } = req.params;
+  try {
+    const caps = await getAgentCapabilities(agentId);
+    if (!caps) {
+      res.status(404).json({ error: 'no live session for agent' });
+      return;
+    }
+    res.json(caps);
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
 });
 
 // Push a new user turn into a live spawned session.
@@ -572,6 +623,47 @@ app.post('/api/agent/:agentId/message', (req, res) => {
   }
   broadcastChat(agentId, 'user', content);
   const ok = runnerSendMessage(agentId, content);
+  res.status(200).json({ ok });
+});
+
+// Switch a live session's permission mode (e.g. arm/disarm the hotel modal).
+app.post('/api/agent/:agentId/mode', async (req, res) => {
+  const { agentId } = req.params;
+  const mode = req.body?.mode;
+  if (!PERMISSION_MODES.includes(mode)) {
+    res.status(400).json({ error: 'invalid mode' });
+    return;
+  }
+  const ok = await runnerSetMode(agentId, mode);
+  if (ok) {
+    const state = agentStates.get(agentId);
+    if (state) { state.permissionMode = mode; }
+    // Switching to bypass means "trust it" — let any tool already awaiting a
+    // decision through, instead of leaving it stuck until timeout.
+    if (mode === 'bypassPermissions') {
+      for (const requestId of resolveAgentRequests(agentId, { outcome: 'allow' })) {
+        wsManager.broadcast('permission-resolved', { agentId, requestId });
+      }
+      if (state) state.waitingForInput = false;
+    }
+    wsManager.broadcast('thinking', getAgentStatesArray());
+  }
+  res.status(200).json({ ok });
+});
+
+// Switch a live session's model (empty string → CLI default).
+app.post('/api/agent/:agentId/model', async (req, res) => {
+  const { agentId } = req.params;
+  const model = req.body?.model;
+  if (typeof model !== 'string') {
+    res.status(400).json({ error: 'model required (use "" for default)' });
+    return;
+  }
+  const ok = await runnerSetModel(agentId, model);
+  if (ok) {
+    const state = agentStates.get(agentId);
+    if (state) { state.model = model || undefined; wsManager.broadcast('thinking', getAgentStatesArray()); }
+  }
   res.status(200).json({ ok });
 });
 
@@ -594,6 +686,14 @@ app.post('/api/agent/:agentId/stop', async (req, res) => {
 // List all known projects (buildings in the town)
 app.get('/api/projects', (_req, res) => {
   res.json(registry.list());
+});
+
+// Cached capabilities for a project's spawn-form selectors (models, subagents,
+// commands). Empty on a cold start with no live agent yet; the client then
+// falls back to its defaults.
+app.get('/api/projects/:projectId/capabilities', (req, res) => {
+  const caps = getProjectCapabilities(req.params.projectId);
+  res.json(caps ?? { commands: [], models: [], agents: [] });
 });
 
 // Get current graph state for a project (defaults to the first known project)

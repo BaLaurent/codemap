@@ -108,13 +108,15 @@ const toolBox: CSSProperties = {
 };
 
 export function InteractionModal({
-  agentName, mode, question, toolName, toolInput, onSubmitAnswers, onDecide, onClose,
+  agentName, mode, question, toolName, toolInput, title, description, onSubmitAnswers, onDecide, onClose,
 }: {
   agentName: string;
   mode: 'question' | 'permission';
   question?: AgentQuestion;
   toolName?: string;
   toolInput?: string;
+  title?: string;        // permission: SDK-rendered prompt sentence
+  description?: string;  // permission: SDK-rendered subtitle
   onSubmitAnswers?: (answers: QuestionAnswer[]) => void;
   onDecide?: (allow: boolean) => void;
   onClose: () => void;
@@ -152,9 +154,10 @@ export function InteractionModal({
             <button style={closeBtn} onClick={onClose} title="Fermer">✕</button>
           </div>
           <div style={body}>
-            <div style={{ marginBottom: 4 }}>Autoriser l'exécution de :</div>
+            <div style={{ marginBottom: 4 }}>{title || "Autoriser l'exécution de :"}</div>
             <div style={headerChip}>{toolName || 'Tool'}</div>
             {toolInput && <div style={toolBox}>{toolInput}</div>}
+            {description && <div style={{ fontSize: 12, opacity: 0.7, marginTop: 6 }}>{description}</div>}
           </div>
           <div style={footer}>
             <button style={decisionBtn('deny')} onClick={() => onDecide?.(false)}>Refuser</button>
