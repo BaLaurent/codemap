@@ -87,10 +87,29 @@ export function HabboRoom({ projectId, focusRequest }: { projectId?: string; foc
   // Room activity tracking for pulse effect
   const roomActivityRef = useRef<Map<string, number>>(new Map());  // roomName -> lastActivityTimestamp
 
-  // Performance metrics tracking
-  const lastFrameTimeRef = useRef<number>(0);
+  // Performance metrics tracking. lastDrawTimeRef doubles as the throttle gate
+  // (time of last actual scene draw) and the basis for the displayed FPS, so the
+  // metric reflects real draw cadence rather than the ~60Hz rAF callback rate.
+  const lastDrawTimeRef = useRef<number>(0);
   const frameTimesRef = useRef<number[]>([]);
   const fpsRef = useRef<number>(0);
+
+  // Static scene cache (Tier 2): floors, walls, windows, rugs, scatter, cables,
+  // wall art and door frames are deterministic and only change when the layout
+  // is rebuilt. They are pre-rendered once into an offscreen canvas (in world
+  // pixels) and blitted each frame instead of being repainted tile-by-tile.
+  // staticCacheBuiltRef is cleared on every layout rebuild to force a refresh;
+  // originRef holds the offscreen's top-left world position so it can be placed
+  // correctly inside the zoom/pan transform.
+  const staticCacheRef = useRef<HTMLCanvasElement | null>(null);
+  const staticCacheOriginRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const staticCacheBuiltRef = useRef(false);
+
+  // Timestamp of the last "interesting" event (agent state change or file
+  // activity). Drives the adaptive draw throttle (Tier 4): once nothing has
+  // happened, no agent is moving and the user is not interacting, the scene
+  // steps down to a low idle frame rate instead of repainting at the full rate.
+  const lastInterestingAtRef = useRef<number>(0);
 
   // Zoom and pan state
   const zoomRef = useRef(1);
@@ -258,8 +277,13 @@ export function HabboRoom({ projectId, focusRequest }: { projectId?: string; foc
     return room.depth === 0 ? 'medium' : 'medium';
   };
 
-  // Draw room structure (floors, walls, furniture) - NOT signs
-  const drawRoomStructure = (ctx: CanvasRenderingContext2D, room: RoomLayout, now: number, frame: number) => {
+  // Static structures only (floors, walls, windows, fixtures, wall art, rug,
+  // scatter, cables, door frames). These are deterministic — no `now`/`frame`
+  // dependency — so they are what gets pre-rendered into the offscreen cache.
+  // Rooms are spatially disjoint siblings under the root (see buildFloorsByDepth
+  // → children: []), so painting all statics before any dynamics never inverts
+  // z-order between rooms.
+  const drawRoomStatic = (ctx: CanvasRenderingContext2D, room: RoomLayout) => {
     drawFloor(ctx, room);
     drawFloorVents(ctx, room);
     drawCableRuns(ctx, room);
@@ -270,6 +294,15 @@ export function HabboRoom({ projectId, focusRequest }: { projectId?: string; foc
     drawWallArt(ctx, room);
     drawRug(ctx, room);
     drawScatter(ctx, room, getRoomDensity(room));
+    room.children.forEach(child => drawRoomStatic(ctx, child));
+    drawDoorFrames(ctx, room);
+  };
+
+  // Per-frame room content drawn on top of the blitted static cache: themed
+  // decorations (animated), desks + labels (screens flash on activity) and the
+  // room activity pulse. Drawn in the same relative order as the original
+  // structure pass (decorations under desks, pulse over both).
+  const drawRoomDynamic = (ctx: CanvasRenderingContext2D, room: RoomLayout, now: number, frame: number) => {
     drawRoomThemedDecorations(ctx, room, frame);
 
     room.files.forEach(file => {
@@ -298,9 +331,7 @@ export function HabboRoom({ projectId, focusRequest }: { projectId?: string; foc
       }
     }
 
-    // Recursively draw child room structures
-    room.children.forEach(child => drawRoomStructure(ctx, child, now, frame));
-    drawDoorFrames(ctx, room);
+    room.children.forEach(child => drawRoomDynamic(ctx, child, now, frame));
   };
 
   // Draw all room signs (separate pass so they render on top of all floors)
@@ -309,11 +340,51 @@ export function HabboRoom({ projectId, focusRequest }: { projectId?: string; foc
     room.children.forEach(child => drawAllRoomSigns(ctx, child));
   };
 
-  // Draw a complete room with all elements
+  // Pre-render the static layer into an offscreen canvas sized to the layout
+  // bounding box (plus a margin for wall overhang). Returns null when the scene
+  // is pathologically large (beyond the canvas dimension cap) so the caller can
+  // fall back to direct drawing. World→offscreen mapping is a single translate.
+  const buildStaticCache = (layout: RoomLayout): HTMLCanvasElement | null => {
+    const MARGIN = 40; // px, covers walls drawn outside the room rect
+    const MAX_DIM = 16384; // conservative canvas side cap
+    const originX = layout.x * TILE_SIZE - MARGIN;
+    const originY = layout.y * TILE_SIZE - MARGIN;
+    const w = Math.ceil(layout.width * TILE_SIZE + MARGIN * 2);
+    const h = Math.ceil(layout.height * TILE_SIZE + MARGIN * 2);
+    if (w <= 0 || h <= 0 || w > MAX_DIM || h > MAX_DIM) return null;
+
+    const off = document.createElement('canvas');
+    off.width = w;
+    off.height = h;
+    const offCtx = off.getContext('2d');
+    if (!offCtx) return null;
+
+    offCtx.translate(-originX, -originY);
+    drawRoomStatic(offCtx, layout);
+    staticCacheOriginRef.current = { x: originX, y: originY };
+    return off;
+  };
+
+  // Draw a complete room: blit the cached static layer, then the per-frame
+  // dynamic content, then signs on top (matching the original z-order).
   const drawRoom = (ctx: CanvasRenderingContext2D, room: RoomLayout, now: number, frame: number) => {
-    // First pass: draw all room structures (floors, walls, furniture)
-    drawRoomStructure(ctx, room, now, frame);
-    // Second pass: draw all room signs on top
+    if (!staticCacheBuiltRef.current) {
+      staticCacheRef.current = buildStaticCache(room);
+      staticCacheBuiltRef.current = true;
+    }
+
+    const cache = staticCacheRef.current;
+    if (cache) {
+      const prevSmoothing = ctx.imageSmoothingEnabled;
+      ctx.imageSmoothingEnabled = false; // keep pixel art crisp when zoomed
+      ctx.drawImage(cache, staticCacheOriginRef.current.x, staticCacheOriginRef.current.y);
+      ctx.imageSmoothingEnabled = prevSmoothing;
+    } else {
+      // Oversized scene or no 2D context: draw statics directly this frame.
+      drawRoomStatic(ctx, room);
+    }
+
+    drawRoomDynamic(ctx, room, now, frame);
     drawAllRoomSigns(ctx, room);
   };
 
@@ -371,6 +442,8 @@ export function HabboRoom({ projectId, focusRequest }: { projectId?: string; foc
           lastNodeCountRef.current = nodeCount;
           lastRenderedFloorRef.current = cur;
           layoutRef.current = buildLayout(graphData.nodes);
+          // Structures changed → the static cache must be re-rendered.
+          staticCacheBuiltRef.current = false;
 
           // buildLayout just repopulated floorsRef; surface the floor set into
           // React state when it actually changed, so the nav bar re-renders.
@@ -392,21 +465,8 @@ export function HabboRoom({ projectId, focusRequest }: { projectId?: string; foc
         }
       };
 
-      // Calculate FPS
-      if (lastFrameTimeRef.current > 0) {
-        const frameTime = now - lastFrameTimeRef.current;
-        frameTimesRef.current.push(frameTime);
-        // Keep last 60 frame times for averaging
-        if (frameTimesRef.current.length > 60) {
-          frameTimesRef.current.shift();
-        }
-        // Calculate average FPS every 10 frames
-        if (frame % 10 === 0 && frameTimesRef.current.length > 0) {
-          const avgFrameTime = frameTimesRef.current.reduce((a, b) => a + b, 0) / frameTimesRef.current.length;
-          fpsRef.current = Math.round(1000 / avgFrameTime);
-        }
-      }
-      lastFrameTimeRef.current = now;
+      // FPS is measured per actual draw (after the throttle gate below), not per
+      // rAF callback, so the on-screen metric reflects the real repaint cadence.
 
       // Arrow key panning (smooth, runs every frame)
       const panSpeed = 8;
@@ -426,6 +486,7 @@ export function HabboRoom({ projectId, focusRequest }: { projectId?: string; foc
       // === SYNC AGENTS (replaces useEffect) ===
       if (thinkingVersionRef.current !== lastThinkingVersionRef.current) {
         lastThinkingVersionRef.current = thinkingVersionRef.current;
+        lastInterestingAtRef.current = now; // wake the draw throttle
         const agents = agentCharactersRef.current;
         // When scoped to a building, only materialize that project's agents.
         const thinkingAgents = projectId
@@ -560,6 +621,7 @@ export function HabboRoom({ projectId, focusRequest }: { projectId?: string; foc
       // === HANDLE ACTIVITY (replaces useEffect) ===
       if (activityVersionRef.current !== lastActivityVersionRef.current) {
         lastActivityVersionRef.current = activityVersionRef.current;
+        lastInterestingAtRef.current = now; // wake the draw throttle
         const recentActivity = recentActivityRef.current;
 
         if (recentActivity) {
@@ -597,10 +659,27 @@ export function HabboRoom({ projectId, focusRequest }: { projectId?: string; foc
               // Determine if this is a glob pattern (filename match) or content search
               const isGlobPattern = pattern.includes('*') || pattern.includes('?');
 
+              // Hoist invariants out of the per-file loop: the normalized search
+              // path and the glob→regex depend only on the search query, not on
+              // the file being tested. Compiling the regex once (instead of once
+              // per file) keeps search-end O(files) instead of O(files × regex).
+              const normalizedSearchPath = searchPath.replace(/^\.\//, '');
+              let globRegex: RegExp | null = null;
+              if (isGlobPattern) {
+                try {
+                  const regexPattern = pattern
+                    .replace(/\*\*/g, '.*')
+                    .replace(/\*/g, '[^/]*')
+                    .replace(/\?/g, '.');
+                  globRegex = new RegExp(regexPattern, 'i');
+                } catch {
+                  globRegex = null; // Invalid pattern → matches nothing
+                }
+              }
+
               // Flash all files in the search path
               for (const fileId of filePositionsRef.current.keys()) {
                 // Check if file is in the search path
-                const normalizedSearchPath = searchPath.replace(/^\.\//, '');
                 const inSearchPath = searchPath === '.' ||
                                      searchPath === '' ||
                                      normalizedSearchPath === '' ||
@@ -610,21 +689,13 @@ export function HabboRoom({ projectId, focusRequest }: { projectId?: string; foc
                 if (inSearchPath) {
                   // For glob patterns, also check if filename matches
                   if (isGlobPattern) {
-                    try {
-                      const regexPattern = pattern
-                        .replace(/\*\*/g, '.*')
-                        .replace(/\*/g, '[^/]*')
-                        .replace(/\?/g, '.');
-                      const regex = new RegExp(regexPattern, 'i');
-                      const fileName = fileId.split('/').pop() || fileId;
-                      if (regex.test(fileName) || regex.test(fileId)) {
-                        screenFlashesRef.current.set(fileId, {
-                          type: 'search',
-                          startTime: now
-                        });
-                      }
-                    } catch {
-                      // Invalid regex, skip this file
+                    if (!globRegex) continue;
+                    const fileName = fileId.split('/').pop() || fileId;
+                    if (globRegex.test(fileName) || globRegex.test(fileId)) {
+                      screenFlashesRef.current.set(fileId, {
+                        type: 'search',
+                        startTime: now
+                      });
                     }
                   } else {
                     // Content search (Grep) - flash all files in path
@@ -771,6 +842,39 @@ export function HabboRoom({ projectId, focusRequest }: { projectId?: string; foc
 
       // Rebuild layout if nodes or displayed floor changed (top-of-frame site)
       ensureLayoutForCurrentFloor();
+
+      // === DRAW THROTTLE (adaptive) ===
+      // Everything above (state syncs, agent movement) ran this rAF tick so the
+      // simulation stays smooth at the browser's native rate. The expensive
+      // full-scene repaint below is capped: repainting the whole hotel 60-120×/s
+      // is wasted work. 30fps while active; 10fps once the scene is idle — no
+      // agent moving, no user interaction, nothing happened for IDLE_AFTER_MS.
+      const IDLE_AFTER_MS = 4000;
+      const isInteracting =
+        isDraggingRef.current ||
+        keysDownRef.current.size > 0 ||
+        trackedAgentIdRef.current !== null;
+      let anyAgentMoving = false;
+      for (const [, c] of agentCharactersRef.current) {
+        if (c.isMoving) { anyAgentMoving = true; break; }
+      }
+      const active =
+        isInteracting ||
+        anyAgentMoving ||
+        now - lastInterestingAtRef.current < IDLE_AFTER_MS;
+      const targetFps = active ? 30 : 10;
+      if (now - lastDrawTimeRef.current < 1000 / targetFps) {
+        animationRef.current = requestAnimationFrame(render);
+        return;
+      }
+      // Update the FPS metric from the real inter-draw interval.
+      if (lastDrawTimeRef.current > 0) {
+        frameTimesRef.current.push(now - lastDrawTimeRef.current);
+        if (frameTimesRef.current.length > 60) frameTimesRef.current.shift();
+        const avgFrameTime = frameTimesRef.current.reduce((a, b) => a + b, 0) / frameTimesRef.current.length;
+        fpsRef.current = Math.round(1000 / avgFrameTime);
+      }
+      lastDrawTimeRef.current = now;
 
       // Draw sky background
       ctx.fillStyle = '#C8E8F8';

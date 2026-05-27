@@ -4,6 +4,21 @@ import { PALETTE } from './palette';
 import { seededRandom, adjustBrightness, adjustHSL, getShadowOffset } from './utils';
 import { calculateFlashOpacity, isFlashExpired } from '../utils/screen-flash';
 
+// Text width is deterministic for a given font + string. measureText itself is
+// not free when called for every label and room sign on every frame, so memoize
+// by font+text. The caller must set ctx.font to `font` before calling (labels
+// and signs already do) so a cache miss measures with the correct font.
+const textWidthCache = new Map<string, number>();
+const measureTextCached = (ctx: CanvasRenderingContext2D, font: string, text: string): number => {
+  const key = `${font} ${text}`;
+  let width = textWidthCache.get(key);
+  if (width === undefined) {
+    width = ctx.measureText(text).width;
+    textWidthCache.set(key, width);
+  }
+  return width;
+};
+
 // Draw desk with monitor, chair, and accessories
 export const drawDesk = (
   ctx: CanvasRenderingContext2D,
@@ -250,7 +265,7 @@ export const drawLabel = (ctx: CanvasRenderingContext2D, file: FileLayout) => {
 
   ctx.font = '9px monospace';
   const text = file.name;
-  const tw = ctx.measureText(text).width;
+  const tw = measureTextCached(ctx, '9px monospace', text);
   const padX = 6;
   const height = 14;
   const width = tw + padX * 2;
@@ -574,7 +589,7 @@ export const drawRoomSign = (ctx: CanvasRenderingContext2D, room: RoomLayout) =>
 
   ctx.font = 'bold 10px monospace';
   const text = room.name;
-  const tw = ctx.measureText(text).width;
+  const tw = measureTextCached(ctx, 'bold 10px monospace', text);
   const padX = 10;
   const height = 18;
   const width = tw + padX * 2;
