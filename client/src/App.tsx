@@ -6,6 +6,8 @@ import { FileGraph } from './components/FileGraph';
 import { ActivityLegend } from './components/ActivityLegend';
 import { TownView } from './components/TownView';
 import { AgentRosterPanel, type AgentFocusRequest, type FocusRequest, type ActionRequest } from './components/AgentRosterPanel';
+import { AgentStreamProvider } from './hooks/AgentStream';
+import { ChatProvider, useChat } from './components/ChatHost';
 import { getMuted, setMuted } from './sounds';
 
 // Mute button component
@@ -81,30 +83,45 @@ const navLinkStyle: React.CSSProperties = {
 };
 
 // HotelView - Shows the town of projects (each a building); drill into one for the interior.
-// Owns the selected-building state so the "Town" back button lives in the shared
-// nav cluster alongside Tree/Hotel rather than floating on its own.
+// Owns the selected-building state (needed by AgentStreamProvider) and wraps the
+// interior in the providers that keep the WS stream + chat panel alive across
+// town<->building navigation. The actual UI is in HotelViewInner (it consumes useChat).
 function HotelView() {
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
+
+  return (
+    <AgentStreamProvider projectId={selectedProject ?? undefined}>
+      <ChatProvider>
+        <HotelViewInner selectedProject={selectedProject} onSelectProject={setSelectedProject} />
+      </ChatProvider>
+    </AgentStreamProvider>
+  );
+}
+
+function HotelViewInner({ selectedProject, onSelectProject }: {
+  selectedProject: string | null;
+  onSelectProject: (p: string | null) => void;
+}) {
   const [focusRequest, setFocusRequest] = useState<FocusRequest | null>(null);
   const [actionRequest, setActionRequest] = useState<ActionRequest | null>(null);
+  const { openChat } = useChat();
 
   // Clicking an agent in the roster: enter its building (if known) and stamp a
   // fresh focus request so HabboRoom flies the camera to it.
   const handleSelectAgent = ({ projectId, agentId }: AgentFocusRequest) => {
-    if (projectId) setSelectedProject(projectId);
+    if (projectId) onSelectProject(projectId);
     setFocusRequest({ projectId, agentId, ts: Date.now() });
   };
 
-  // Roster chat / respond buttons: open the panel or modal WITHOUT moving the
-  // camera (no building switch, no focus change). Data is global, so it works
-  // even for an agent in another building.
-  const handleOpenChat = (agentId: string) => setActionRequest({ agentId, action: 'chat', ts: Date.now() });
+  // Roster chat button: open the panel directly (it lives above the building view,
+  // so this works even from the town overview or for an agent in another building).
+  // Respond opens the in-building modal without moving the camera.
   const handleRespond = (agentId: string) => setActionRequest({ agentId, action: 'respond', ts: Date.now() });
 
   return (
     <>
-      <TownView selected={selectedProject} onSelect={setSelectedProject} focusRequest={focusRequest} actionRequest={actionRequest} />
-      <AgentRosterPanel onSelectAgent={handleSelectAgent} onOpenChat={handleOpenChat} onRespond={handleRespond} />
+      <TownView selected={selectedProject} onSelect={onSelectProject} focusRequest={focusRequest} actionRequest={actionRequest} />
+      <AgentRosterPanel onSelectAgent={handleSelectAgent} onOpenChat={openChat} onRespond={handleRespond} />
       <div style={{
         position: 'absolute',
         top: 16,
@@ -117,7 +134,7 @@ function HotelView() {
         <Link to="/hotel" style={navLinkStyle}>Hotel</Link>
         {selectedProject && (
           <button
-            onClick={() => setSelectedProject(null)}
+            onClick={() => onSelectProject(null)}
             style={{ ...navLinkStyle, cursor: 'pointer' }}
             title="Back to the town overview"
           >

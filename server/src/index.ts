@@ -11,6 +11,7 @@ import { listSubdirectories } from './fs-browse.js';
 import { getHotFolders, clearCache as clearGitCache } from './git-activity.js';
 import { randomUUID } from 'node:crypto';
 import { FileActivityEvent, ThinkingEvent, AgentThinkingState, InteractionOutcome, ChatMessage } from './types.js';
+import { appendChatMessage, getTranscript, clearTranscripts } from './transcript-store.js';
 import { fileFromActivityEvent } from './agent-file.js';
 import { registerRequest, awaitDecision, resolveRequest, resolveAgentRequests } from './pending-requests.js';
 import { spawnAgent, sendMessage as runnerSendMessage, stopAgent, getAgentCapabilities, getProjectCapabilities, setMode as runnerSetMode, setModel as runnerSetModel, type PermissionRequest } from './agent-runner/index.js';
@@ -534,7 +535,9 @@ app.post('/api/agent/:agentId/permission', (req, res) => {
 // Spawn a Claude agent in-process and chat with it from the hotel. Its own hooks
 // report under the forced sessionId, so it shows up as a normal hotel character.
 function broadcastChat(agentId: string, role: ChatMessage['role'], content: string, tool?: ChatMessage['tool']): void {
-  wsManager.broadcast('chat', { agentId, role, content, timestamp: Date.now(), ...(tool ? { tool } : {}) });
+  const msg: ChatMessage = { agentId, role, content, timestamp: Date.now(), ...(tool ? { tool } : {}) };
+  appendChatMessage(msg);
+  wsManager.broadcast('chat', msg);
 }
 
 const PERMISSION_MODES: PermissionMode[] = ['default', 'acceptEdits', 'bypassPermissions', 'plan', 'dontAsk', 'auto'];
@@ -639,6 +642,13 @@ app.post('/api/agent/:agentId/message', (req, res) => {
   broadcastChat(agentId, 'user', content);
   const ok = runnerSendMessage(agentId, content);
   res.status(200).json({ ok });
+});
+
+// Return the full chat transcript for a hotel-spawned agent.
+// Always 200 with an empty array when the agent is unknown or has been cleared,
+// so the client can use this endpoint for post-mortem replay after a kill.
+app.get('/api/agent/:agentId/transcript', (req, res) => {
+  res.json(getTranscript(req.params.agentId));
 });
 
 // Switch a live session's permission mode (e.g. arm/disarm the hotel modal).
@@ -876,6 +886,7 @@ app.post('/api/clear', (_req, res) => {
 app.post('/api/agents/clear', (_req, res) => {
   const cleared = agentStates.size;
   agentStates.clear();
+  clearTranscripts();
   refreshAgentCounts();
   saveAgentState();
   wsManager.broadcast('thinking', getAgentStatesArray());

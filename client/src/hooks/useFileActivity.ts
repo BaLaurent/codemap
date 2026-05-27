@@ -71,6 +71,13 @@ export function useFileActivity(projectId?: string): {
   // Connection status for UI indicator
   const connectionStatusRef = useRef<ConnectionStatus>('connecting');
 
+  // The building currently being watched, held in a ref so the WS handler reads
+  // the live value without `connect` depending on `projectId`. This keeps a
+  // SINGLE socket alive across building switches (the provider that hosts this
+  // hook never unmounts) — only the scoped graph re-fetches. Without it, every
+  // navigation tore down and rebuilt the socket, dropping in-flight chat lines.
+  const watchedProjectRef = useRef(projectId);
+
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<number>();
 
@@ -78,7 +85,7 @@ export function useFileActivity(projectId?: string): {
     connectionStatusRef.current = 'connecting';
 
     // Fetch initial graph state (scoped to the watched building when set)
-    const graphQuery = projectId ? `?projectId=${encodeURIComponent(projectId)}` : '';
+    const graphQuery = watchedProjectRef.current ? `?projectId=${encodeURIComponent(watchedProjectRef.current)}` : '';
     fetch(`${API_URL}/graph${graphQuery}`)
       .then(res => res.json())
       .then(data => {
@@ -120,7 +127,7 @@ export function useFileActivity(projectId?: string): {
       try {
         const message = JSON.parse(event.data);
         // Ignore messages for other buildings when scoped to one project.
-        if (!shouldApplyMessage(message, projectId)) return;
+        if (!shouldApplyMessage(message, watchedProjectRef.current)) return;
         if (message.type === 'graph') {
           graphDataRef.current = message.data;
         } else if (message.type === 'activity') {
@@ -182,6 +189,17 @@ export function useFileActivity(projectId?: string): {
         console.error('Failed to parse message:', err);
       }
     };
+  }, []);
+
+  // Re-scope the graph when the watched building changes WITHOUT reconnecting the
+  // socket: update the ref the handler reads, then re-fetch the scoped graph.
+  useEffect(() => {
+    watchedProjectRef.current = projectId;
+    const graphQuery = projectId ? `?projectId=${encodeURIComponent(projectId)}` : '';
+    fetch(`${API_URL}/graph${graphQuery}`)
+      .then(res => res.json())
+      .then(data => { graphDataRef.current = data; })
+      .catch(console.error);
   }, [projectId]);
 
   useEffect(() => {
