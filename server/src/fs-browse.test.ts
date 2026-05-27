@@ -31,4 +31,28 @@ describe('listSubdirectories', () => {
     const r = listSubdirectories('');
     expect(r.path).toBe(os.homedir());
   });
+
+  it('includes a symlink pointing to a real directory', () => {
+    const base = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-fs-link-'));
+    try {
+      const target = path.join(base, 'real-target');
+      fs.mkdirSync(target);
+      fs.symlinkSync(target, path.join(base, 'link-to-dir'));
+      const r = listSubdirectories(base);
+      expect(r.entries.map(e => e.name)).toContain('link-to-dir');
+    } finally {
+      fs.rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  it('excludes a dangling symlink', () => {
+    const base = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-fs-dangle-'));
+    try {
+      fs.symlinkSync(path.join(base, 'does-not-exist'), path.join(base, 'broken'));
+      const r = listSubdirectories(base);
+      expect(r.entries.map(e => e.name)).not.toContain('broken');
+    } finally {
+      fs.rmSync(base, { recursive: true, force: true });
+    }
+  });
 });
