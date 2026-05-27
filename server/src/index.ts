@@ -6,7 +6,8 @@ import { createServer } from 'http';
 import { WebSocketManager } from './websocket.js';
 import os from 'os';
 import { ProjectRegistry } from './project-registry.js';
-import { deriveProjectFromPath } from './project-identity.js';
+import { deriveProjectFromPath, deriveProjectFromDir } from './project-identity.js';
+import { listSubdirectories } from './fs-browse.js';
 import { getHotFolders, clearCache as clearGitCache } from './git-activity.js';
 import { randomUUID } from 'node:crypto';
 import { FileActivityEvent, ThinkingEvent, AgentThinkingState, InteractionOutcome, ChatMessage } from './types.js';
@@ -689,6 +690,55 @@ app.post('/api/agent/:agentId/stop', async (req, res) => {
 // List all known projects (buildings in the town)
 app.get('/api/projects', (_req, res) => {
   res.json(registry.list());
+});
+
+// Folder browser: list the sub-directories of a path so the town can pick a
+// folder to raise as a building. Defaults to the home directory.
+app.get('/api/fs/list', (req, res) => {
+  const q = typeof req.query.path === 'string' ? req.query.path : '';
+  if (q && (!path.isAbsolute(q) || !fs.existsSync(q) || !fs.statSync(q).isDirectory())) {
+    res.status(400).json({ error: 'invalid path' });
+    return;
+  }
+  try {
+    res.json(listSubdirectories(q));
+  } catch {
+    res.status(400).json({ error: 'cannot read directory' });
+  }
+});
+
+// Pin a folder as a persistent building. Idempotent: pinning an already-tracked
+// project only flips its flag.
+app.post('/api/projects', (req, res) => {
+  const dir = (req.body ?? {}).path;
+  if (typeof dir !== 'string' || !path.isAbsolute(dir) || !fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) {
+    res.status(400).json({ error: 'invalid path' });
+    return;
+  }
+  const fields = deriveProjectFromDir(dir);
+  if (!fields) {
+    res.status(400).json({ error: 'not a project directory' });
+    return;
+  }
+  registry.getOrCreate(fields.projectId, fields.projectRoot, fields.projectName);
+  registry.setPinned(fields.projectId, true);
+  saveAgentState();
+  res.status(200).json(registry.list().find(p => p.projectId === fields.projectId));
+});
+
+// Remove a building. With live agents and no ?kill=true, refuse (409) so the API
+// is not a footgun; the client pre-empts this by showing a kill-confirm modal.
+app.delete('/api/projects/:id', async (req, res) => {
+  const id = req.params.id;
+  const agents = getAgentStatesArray().filter(a => a.projectId === id);
+  if (agents.length > 0 && req.query.kill !== 'true') {
+    res.status(409).json({ agents });
+    return;
+  }
+  for (const a of agents) await killAgent(a.agentId);
+  registry.remove(id);
+  saveAgentState();
+  res.status(200).json({ ok: true });
 });
 
 // Cached capabilities for a project's spawn-form selectors (models, subagents,
