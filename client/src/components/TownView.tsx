@@ -7,6 +7,11 @@ import type { FocusRequest, ActionRequest } from './AgentRosterPanel';
 import { hitTownAt, closeBadgeRect, removeAction } from '../layout/town-hit-test';
 import { FolderBrowser } from './FolderBrowser';
 
+// "Add a folder" button, pinned to the top-LEFT corner. Buildings start at the
+// layout margin (80px) and the nav/roster DOM lives at the top-right, so this
+// corner is always clear. One source of truth for draw and hit-test.
+const ADD_BTN = { x: 12, y: 12, w: 32, h: 32 };
+
 // Controlled by the parent: `selected` is the project being viewed (null = town
 // overview), `onSelect` flips it. The "Town" back control lives in the parent's
 // nav cluster, so this component only renders the town canvas or the interior.
@@ -67,13 +72,13 @@ export function TownView({ selected, onSelect, focusRequest, actionRequest }: {
         ctx.fillText('✕', r.x + r.w / 2, r.y + r.h - 4);
         ctx.textAlign = 'left';
       }
-      // "+" button to add a folder (top-right corner).
+      // "+" button to add a folder (top-left corner — see ADD_BTN).
       ctx.fillStyle = '#FFE040';
-      ctx.fillRect(canvas.width - 44, 12, 32, 32);
+      ctx.fillRect(ADD_BTN.x, ADD_BTN.y, ADD_BTN.w, ADD_BTN.h);
       ctx.fillStyle = '#3A2E12';
       ctx.font = 'bold 24px monospace';
       ctx.textAlign = 'center';
-      ctx.fillText('+', canvas.width - 28, 37);
+      ctx.fillText('+', ADD_BTN.x + ADD_BTN.w / 2, ADD_BTN.y + 25);
       ctx.textAlign = 'left';
       if (placedRef.current.length === 0) {
         ctx.fillStyle = '#8a93a6';
@@ -92,8 +97,8 @@ export function TownView({ selected, onSelect, focusRequest, actionRequest }: {
       canvas.style.cursor = h ? 'pointer' : 'default';
     };
     const onClick = (e: MouseEvent) => {
-      // "+" button (top-right corner) opens the folder browser.
-      if (e.clientX >= canvas.width - 44 && e.clientX <= canvas.width - 12 && e.clientY >= 12 && e.clientY <= 44) {
+      // "+" button (top-left corner) opens the folder browser.
+      if (e.clientX >= ADD_BTN.x && e.clientX <= ADD_BTN.x + ADD_BTN.w && e.clientY >= ADD_BTN.y && e.clientY <= ADD_BTN.y + ADD_BTN.h) {
         setBrowsing(true);
         return;
       }
