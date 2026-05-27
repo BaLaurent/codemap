@@ -98,6 +98,7 @@ function saveAgentState(): void {
     const state = {
       savedAt: Date.now(),
       agents: Array.from(agentStates.values()),
+      pinnedProjects: registry.listPinned(),
     };
     fs.mkdirSync(STATE_DIR, { recursive: true });
     fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
@@ -116,6 +117,13 @@ function loadAgentState(): void {
       for (const agent of data.agents || []) {
         if (now - agent.lastActivity < AGENT_TIMEOUT_MS) {
           agentStates.set(agent.agentId, agent);
+        }
+      }
+
+      for (const p of data.pinnedProjects || []) {
+        if (p && typeof p.projectRoot === 'string' && fs.existsSync(p.projectRoot)) {
+          registry.getOrCreate(p.projectId, p.projectRoot, p.projectName);
+          registry.setPinned(p.projectId, true);
         }
       }
 
