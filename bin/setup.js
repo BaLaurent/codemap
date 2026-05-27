@@ -76,25 +76,19 @@ const permissionsConfig = {
   }
 };
 
-// Cursor hooks configuration (.cursor/hooks.json)
-const cursorHooksConfig = {
-  version: 1,
-  hooks: {
-    // File operations
-    beforeReadFile: [{ command: `${FILE_HOOK} read-start` }],
-    afterFileEdit: [{ command: `${FILE_HOOK} write-end` }],
-    // Shell/command operations
-    beforeShellExecution: [{ command: `${THINKING_HOOK} thinking-end` }],
-    afterShellExecution: [{ command: `${THINKING_HOOK} thinking-start` }],
-    // MCP tool operations
-    beforeMCPExecution: [{ command: `${THINKING_HOOK} thinking-end` }],
-    afterMCPExecution: [{ command: `${THINKING_HOOK} thinking-start` }],
-    // Agent thinking
-    afterAgentThought: [{ command: `${THINKING_HOOK} thinking-start` }],
-    // Prompt submission
-    beforeSubmitPrompt: [{ command: `${THINKING_HOOK} thinking-end` }]
+// Cursor hooks configuration (.cursor/hooks.json) is generated from the
+// versioned template (.cursor/hooks.json.template), the single source of truth
+// for the hook structure. The generated file holds machine-specific absolute
+// paths so it is git-ignored. We substitute __CODEMAP_ROOT__ inside the parsed
+// object (not the raw text) so JSON.stringify on write escapes path separators
+// correctly, including Windows backslashes.
+const cursorTemplatePath = path.join(CODEMAP_ROOT, '.cursor', 'hooks.json.template');
+const cursorHooksConfig = JSON.parse(fs.readFileSync(cursorTemplatePath, 'utf8'));
+for (const eventHooks of Object.values(cursorHooksConfig.hooks)) {
+  for (const entry of eventHooks) {
+    entry.command = entry.command.split('__CODEMAP_ROOT__').join(CODEMAP_ROOT);
   }
-};
+}
 
 // Check if a port is in use
 function isPortInUse(port) {
