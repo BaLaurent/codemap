@@ -220,14 +220,13 @@ export function HabboRoom({ projectId, focusRequest, actionRequest }: { projectI
   // Room activity tracking for pulse effect
   const roomActivityRef = useRef<Map<string, number>>(new Map());  // roomName -> lastActivityTimestamp
 
-  // Performance metrics tracking. lastDrawTimeRef doubles as the throttle gate
-  // (time of last actual scene draw) and the basis for the displayed FPS, so the
-  // metric reflects real draw cadence rather than the ~60Hz rAF callback rate.
+  // Performance metrics tracking. lastDrawTimeRef holds the time of the last
+  // scene draw and is the basis for the displayed FPS.
   const lastDrawTimeRef = useRef<number>(0);
   const frameTimesRef = useRef<number[]>([]);
   const fpsRef = useRef<number>(0);
 
-  // Static scene cache (Tier 2): floors, walls, windows, rugs, scatter, cables,
+  // Static scene cache: floors, walls, windows, rugs, scatter, cables,
   // wall art and door frames are deterministic and only change when the layout
   // is rebuilt. They are pre-rendered once into an offscreen canvas (in world
   // pixels) and blitted each frame instead of being repainted tile-by-tile.
@@ -237,12 +236,6 @@ export function HabboRoom({ projectId, focusRequest, actionRequest }: { projectI
   const staticCacheRef = useRef<HTMLCanvasElement | null>(null);
   const staticCacheOriginRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const staticCacheBuiltRef = useRef(false);
-
-  // Timestamp of the last "interesting" event (agent state change or file
-  // activity). Drives the adaptive draw throttle (Tier 4): once nothing has
-  // happened, no agent is moving and the user is not interacting, the scene
-  // steps down to a low idle frame rate instead of repainting at the full rate.
-  const lastInterestingAtRef = useRef<number>(0);
 
   // Zoom and pan state
   const zoomRef = useRef(1);
@@ -627,7 +620,6 @@ export function HabboRoom({ projectId, focusRequest, actionRequest }: { projectI
       // === SYNC AGENTS (replaces useEffect) ===
       if (thinkingVersionRef.current !== lastThinkingVersionRef.current) {
         lastThinkingVersionRef.current = thinkingVersionRef.current;
-        lastInterestingAtRef.current = now; // wake the draw throttle
         const agents = agentCharactersRef.current;
         // When scoped to a building, only materialize that project's agents.
         const thinkingAgents = projectId
@@ -771,7 +763,6 @@ export function HabboRoom({ projectId, focusRequest, actionRequest }: { projectI
             setChatAgentId(cur => (cur === id ? null : cur));
           }
           killedAgentsRef.current.clear();
-          lastInterestingAtRef.current = now;
         }
 
         // Remove agents only after grace period (30 seconds of not being seen)
@@ -807,7 +798,6 @@ export function HabboRoom({ projectId, focusRequest, actionRequest }: { projectI
       // === HANDLE ACTIVITY (replaces useEffect) ===
       if (activityVersionRef.current !== lastActivityVersionRef.current) {
         lastActivityVersionRef.current = activityVersionRef.current;
-        lastInterestingAtRef.current = now; // wake the draw throttle
         const recentActivity = recentActivityRef.current;
 
         if (recentActivity) {
@@ -1035,31 +1025,9 @@ export function HabboRoom({ projectId, focusRequest, actionRequest }: { projectI
       // Rebuild layout if nodes or displayed floor changed (top-of-frame site)
       ensureLayoutForCurrentFloor();
 
-      // === DRAW THROTTLE (adaptive) ===
-      // Everything above (state syncs, agent movement) ran this rAF tick so the
-      // simulation stays smooth at the browser's native rate. The expensive
-      // full-scene repaint below is capped: repainting the whole hotel 60-120×/s
-      // is wasted work. 30fps while active; 10fps once the scene is idle — no
-      // agent moving, no user interaction, nothing happened for IDLE_AFTER_MS.
-      const IDLE_AFTER_MS = 4000;
-      const isInteracting =
-        isDraggingRef.current ||
-        keysDownRef.current.size > 0 ||
-        trackedAgentIdRef.current !== null;
-      let anyAgentMoving = false;
-      for (const [, c] of agentCharactersRef.current) {
-        if (c.isMoving) { anyAgentMoving = true; break; }
-      }
-      const active =
-        isInteracting ||
-        anyAgentMoving ||
-        now - lastInterestingAtRef.current < IDLE_AFTER_MS;
-      const targetFps = active ? 30 : 10;
-      if (now - lastDrawTimeRef.current < 1000 / targetFps) {
-        animationRef.current = requestAnimationFrame(render);
-        return;
-      }
-      // Update the FPS metric from the real inter-draw interval.
+      // The full-scene repaint below runs on every rAF tick — the browser caps
+      // this at the display's native refresh rate, so there is no manual frame
+      // throttle. Update the FPS metric from the real inter-draw interval.
       if (lastDrawTimeRef.current > 0) {
         frameTimesRef.current.push(now - lastDrawTimeRef.current);
         if (frameTimesRef.current.length > 60) frameTimesRef.current.shift();
@@ -1266,7 +1234,6 @@ export function HabboRoom({ projectId, focusRequest, actionRequest }: { projectI
           }
           ctx.globalAlpha = 1;
           bloodParticlesRef.current = survivors;
-          if (survivors.length) lastInterestingAtRef.current = now;
         }
 
         ctx.restore();
@@ -1288,7 +1255,7 @@ export function HabboRoom({ projectId, focusRequest, actionRequest }: { projectI
       const roomCount = layoutRef.current?.children?.length ?? 0;
 
       const metricsX = 12;
-      const metricsY = 58;
+      const metricsY = 92;
 
       // Background
       ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';

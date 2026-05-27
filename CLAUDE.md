@@ -361,7 +361,7 @@ Room layout is in tile coordinates, converted when drawing.
 
 ## Performance Notes
 
-- Target: 30fps during activity, 10fps when idle
+- Scene repaints every requestAnimationFrame tick, capped only by the display's native refresh rate (no manual FPS throttle)
 - Canvas redraws entire scene each frame
 - ~100 trail footprints max (older ones removed)
 - Git activity cached for 30 seconds
