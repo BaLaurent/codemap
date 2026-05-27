@@ -51,9 +51,10 @@ function bubbleStyle(role: ChatMessage['role']): CSSProperties {
   return { alignSelf: 'flex-start', background: '#fff', border: `2px solid rgba(74,59,26,0.4)`, padding: '5px 8px', marginBottom: 6, maxWidth: '85%', whiteSpace: 'pre-wrap', wordBreak: 'break-word' };
 }
 
-export function AgentChatPanel({ agentName, messages, onSend, onStop, onClose }: {
+export function AgentChatPanel({ agentName, messages, dead, onSend, onStop, onClose }: {
   agentName: string;
   messages: ChatMessage[];
+  dead?: boolean;  // session ended/crashed → input is disabled
   onSend: (content: string) => void;
   onStop: () => void;
   onClose: () => void;
@@ -66,6 +67,7 @@ export function AgentChatPanel({ agentName, messages, onSend, onStop, onClose }:
   }, [messages.length]);
 
   const send = () => {
+    if (dead) return;
     const text = draft.trim();
     if (!text) return;
     onSend(text);
@@ -95,13 +97,18 @@ export function AgentChatPanel({ agentName, messages, onSend, onStop, onClose }:
 
       <div style={inputRow}>
         <input
-          style={textInput}
-          placeholder="Écris à l'agent…"
+          style={{ ...textInput, opacity: dead ? 0.5 : 1, cursor: dead ? 'not-allowed' : 'text' }}
+          placeholder={dead ? 'Session terminée — spawn un nouvel agent' : "Écris à l'agent…"}
           value={draft}
+          disabled={dead}
           onChange={e => setDraft(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
         />
-        <button style={sendBtn} onClick={send}>➤</button>
+        <button
+          style={{ ...sendBtn, opacity: dead ? 0.5 : 1, cursor: dead ? 'not-allowed' : 'pointer' }}
+          disabled={dead}
+          onClick={send}
+        >➤</button>
       </div>
     </div>
   );

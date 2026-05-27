@@ -551,7 +551,10 @@ app.post('/api/agent/spawn', (req, res) => {
     { agentId, cwd: workdir, projectId: typeof projectId === 'string' ? projectId : undefined, initialPrompt },
     {
       onChat: (id, role, content) => broadcastChat(id, role, content),
-      onError: (id, message) => broadcastChat(id, 'system', `⚠️ ${message}`),
+      onError: (id, message) => {
+        console.error(`[${new Date().toISOString()}] agent ${id} SDK session crashed: ${message}`);
+        broadcastChat(id, 'system', "⚠️ La session a planté côté SDK et s'est arrêtée. Spawn un nouvel agent pour continuer.");
+      },
       onEnd: (id) => broadcastChat(id, 'system', '— session terminée —'),
     },
   );
@@ -572,9 +575,19 @@ app.post('/api/agent/:agentId/message', (req, res) => {
   res.status(200).json({ ok });
 });
 
-// Interrupt and close a spawned session.
+// Kill a spawned agent: end its SDK session AND remove its hotel character so it
+// doesn't linger in the room/roster. Runs even if the SDK session already died
+// (e.g. crashed) so a stale character can still be cleared.
 app.post('/api/agent/:agentId/stop', async (req, res) => {
-  const ok = await stopAgent(req.params.agentId);
+  const { agentId } = req.params;
+  const ok = await stopAgent(agentId);
+  if (agentStates.delete(agentId)) {
+    refreshAgentCounts();
+    saveAgentState();
+    wsManager.broadcast('thinking', getAgentStatesArray());
+    // Tell clients to play the death animation at the character's last spot.
+    wsManager.broadcast('agent-killed', { agentId });
+  }
   res.status(200).json({ ok });
 });
 

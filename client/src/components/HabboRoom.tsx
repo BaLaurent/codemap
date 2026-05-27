@@ -13,6 +13,10 @@ import type { FocusRequest, ActionRequest } from './AgentRosterPanel';
 const API_URL = 'http://localhost:5174/api';
 
 const HOT_FOLDERS_LIMIT = 12;
+
+// Gore palette + lifetime for the agent death animation.
+const BLOOD_COLORS = ['#c0241f', '#e23b2e', '#9b1414', '#7a0c0c', '#ff4d3d'];
+const BLOOD_LIFESPAN_MS = 950;
 import { buildFloorsByDepth, FloorModel, findFloorForFile, floorNumbers } from '../layout/floor-by-depth';
 import {
   TILE_SIZE,
@@ -50,6 +54,7 @@ export function HabboRoom({ projectId, focusRequest, actionRequest }: { projectI
     pendingRequestsRef,
     chatHistoryRef,
     chatVersionRef,
+    killedAgentsRef,
     connectionStatusRef
   } = useFileActivity(projectId);
 
@@ -133,6 +138,11 @@ export function HabboRoom({ projectId, focusRequest, actionRequest }: { projectI
     x: number; y: number; timestamp: number; colorIndex: number;
   }>>([]);
   const lastTrailPosRef = useRef<Map<string, { x: number; y: number }>>(new Map());
+
+  // Blood splatter from killed agents: a short-lived burst of red particles.
+  const bloodParticlesRef = useRef<Array<{
+    x: number; y: number; vx: number; vy: number; size: number; color: string; bornAt: number;
+  }>>([]);
 
   // Room activity tracking for pulse effect
   const roomActivityRef = useRef<Map<string, number>>(new Map());  // roomName -> lastActivityTimestamp
@@ -661,6 +671,36 @@ export function HabboRoom({ projectId, focusRequest, actionRequest }: { projectI
           }
         }
 
+        // Gore: an explicitly killed agent bursts into red particles at its last
+        // spot, then its character is removed immediately (no grace wait).
+        if (killedAgentsRef.current.size) {
+          const blood = bloodParticlesRef.current;
+          for (const id of killedAgentsRef.current) {
+            const victim = agents.get(id);
+            if (!victim) continue;
+            for (let i = 0; i < 24; i++) {
+              const angle = -Math.PI / 2 + (Math.random() - 0.5) * Math.PI * 1.7;
+              const speed = 2 + Math.random() * 4.5;
+              blood.push({
+                x: victim.x, y: victim.y - 8,
+                vx: Math.cos(angle) * speed,
+                vy: Math.sin(angle) * speed,
+                size: 2 + Math.random() * 3,
+                color: BLOOD_COLORS[Math.floor(Math.random() * BLOOD_COLORS.length)],
+                bornAt: now,
+              });
+            }
+            agents.delete(id);
+            // killAgent (not removeAgent) releases the camera in place so the
+            // death animation stays in view instead of hopping to another agent.
+            nav.killAgent(id);
+            // Close the chat panel if it was bound to this now-dead agent.
+            setChatAgentId(cur => (cur === id ? null : cur));
+          }
+          killedAgentsRef.current.clear();
+          lastInterestingAtRef.current = now;
+        }
+
         // Remove agents only after grace period (30 seconds of not being seen)
         // This prevents flicker from brief network issues or timing gaps
         const AGENT_GRACE_PERIOD_MS = 30000;
@@ -1133,6 +1173,29 @@ export function HabboRoom({ projectId, focusRequest, actionRequest }: { projectI
           drawAgentCharacter(ctx, char);
         }
 
+        // Blood splatter from killed agents — advance physics + draw on top.
+        const blood = bloodParticlesRef.current;
+        if (blood.length) {
+          const survivors: typeof blood = [];
+          for (const p of blood) {
+            const age = now - p.bornAt;
+            if (age > BLOOD_LIFESPAN_MS) continue;
+            p.x += p.vx;
+            p.y += p.vy;
+            p.vy += 0.45;   // gravity
+            p.vx *= 0.98;   // air drag
+            survivors.push(p);
+            ctx.globalAlpha = Math.max(0, 1 - age / BLOOD_LIFESPAN_MS);
+            ctx.fillStyle = p.color;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          ctx.globalAlpha = 1;
+          bloodParticlesRef.current = survivors;
+          if (survivors.length) lastInterestingAtRef.current = now;
+        }
+
         ctx.restore();
       } else {
         ctx.fillStyle = 'rgba(0, 0, 0, 0.08)';
@@ -1554,17 +1617,22 @@ export function HabboRoom({ projectId, focusRequest, actionRequest }: { projectI
         )}
       </div>
 
-      {chatAgentId && (
-        <AgentChatPanel
-          agentName={
-            thinkingAgentsRef.current.find(a => a.agentId === chatAgentId)?.displayName || 'Agent'
-          }
-          messages={chatHistoryRef.current.get(chatAgentId) ?? []}
-          onSend={content => sendChat(chatAgentId, content)}
-          onStop={() => { stopChat(chatAgentId); setChatAgentId(null); }}
-          onClose={() => setChatAgentId(null)}
-        />
-      )}
+      {chatAgentId && (() => {
+        const history = chatHistoryRef.current.get(chatAgentId) ?? [];
+        // The runner only emits a 'system' line on crash/end, and it's terminal,
+        // so a system message in last position means the session is dead.
+        const dead = history.length > 0 && history[history.length - 1].role === 'system';
+        return (
+          <AgentChatPanel
+            agentName={thinkingAgentsRef.current.find(a => a.agentId === chatAgentId)?.displayName || 'Agent'}
+            messages={history}
+            dead={dead}
+            onSend={content => sendChat(chatAgentId, content)}
+            onStop={() => { stopChat(chatAgentId); setChatAgentId(null); }}
+            onClose={() => setChatAgentId(null)}
+          />
+        );
+      })()}
     </div>
   );
 }

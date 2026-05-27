@@ -13,7 +13,8 @@ export type NavAction =
   | { kind: 'agentActivity'; agentId: string; floor: number }
   | { kind: 'selectAgent'; agentId: string }
   | { kind: 'selectFloor'; floor: number }
-  | { kind: 'removeAgent'; agentId: string };
+  | { kind: 'removeAgent'; agentId: string }
+  | { kind: 'killAgent'; agentId: string };
 
 export const INITIAL_NAV_STATE: NavState = { currentFloorIndex: 0, focusAgentId: null, follow: false };
 
@@ -56,6 +57,12 @@ export function reduceNav(
         currentFloorIndex: agentFloors.get(next) ?? state.currentFloorIndex,
       };
     }
+    case 'killAgent':
+      // Unlike removeAgent (grace timeout, which hops to another agent), an
+      // explicit kill releases the camera in place — no successor jump — so the
+      // dying agent's death animation stays on screen.
+      if (action.agentId !== state.focusAgentId) return state;
+      return { ...state, focusAgentId: null, follow: false };
   }
 }
 
@@ -67,6 +74,7 @@ export interface FloorNavigation {
   selectAgent: (agentId: string) => void;
   selectFloor: (floor: number) => void;
   removeAgent: (agentId: string) => void;
+  killAgent: (agentId: string) => void;
 }
 
 export function useFloorNavigation(): FloorNavigation {
@@ -102,8 +110,13 @@ export function useFloorNavigation(): FloorNavigation {
     dispatch({ kind: 'removeAgent', agentId });
   }, [dispatch]);
 
+  const killAgent = useCallback((agentId: string) => {
+    agentFloorsRef.current.delete(agentId);
+    dispatch({ kind: 'killAgent', agentId });
+  }, [dispatch]);
+
   return {
     state, snapshotRef, agentFloorsRef,
-    noteAgentActivity, selectAgent, selectFloor, removeAgent,
+    noteAgentActivity, selectAgent, selectFloor, removeAgent, killAgent,
   };
 }

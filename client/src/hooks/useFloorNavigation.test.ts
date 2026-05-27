@@ -78,4 +78,18 @@ describe('reduceNav', () => {
     expect(next.follow).toBe(true);
     expect(next.currentFloorIndex).toBe(5);
   });
+
+  it('killing the focus agent releases the camera in place (no successor jump)', () => {
+    const s: NavState = { currentFloorIndex: 5, focusAgentId: 'a', follow: true };
+    const next = reduceNav(s, { kind: 'killAgent', agentId: 'a' }, new Map([['b', 8]]));
+    expect(next.focusAgentId).toBeNull();
+    expect(next.follow).toBe(false);
+    expect(next.currentFloorIndex).toBe(5);
+  });
+
+  it('killing a non-focus agent leaves the camera untouched', () => {
+    const s: NavState = { currentFloorIndex: 5, focusAgentId: 'a', follow: true };
+    const next = reduceNav(s, { kind: 'killAgent', agentId: 'b' }, new Map([['a', 5]]));
+    expect(next).toEqual(s);
+  });
 });

@@ -103,6 +103,7 @@ export function buildRoster(
 export interface AgentRoster {
   groups: RosterGroup[];
   clearAgents: () => void;
+  stopAgent: (agentId: string) => void;
 }
 
 export function useAgentRoster(): AgentRoster {
@@ -154,5 +155,15 @@ export function useAgentRoster(): AgentRoster {
       .catch(() => {});
   }, []);
 
-  return { groups, clearAgents };
+  // Kill a single spawned agent (ends its SDK session + removes its character).
+  // Drop it from the list optimistically; the next poll reconciles if needed.
+  const stopAgent = useCallback((agentId: string) => {
+    fetch(`${API_URL}/agent/${agentId}/stop`, { method: 'POST' })
+      .then(() => setGroups(prev => prev
+        .map(g => ({ ...g, agents: g.agents.filter(a => a.agentId !== agentId) }))
+        .filter(g => g.agents.length > 0)))
+      .catch(() => {});
+  }, []);
+
+  return { groups, clearAgents, stopAgent };
 }

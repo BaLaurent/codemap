@@ -116,10 +116,10 @@ export function AgentRosterPanel({ onSelectAgent, onOpenChat, onRespond }: {
   onOpenChat?: (agentId: string) => void;
   onRespond?: (agentId: string) => void;
 }) {
-  const { groups, clearAgents } = useAgentRoster();
+  const { groups, clearAgents, stopAgent } = useAgentRoster();
   const [collapsed, setCollapsed] = useState(() => loadBool(COLLAPSED_KEY));
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => loadSet(GROUPS_KEY));
-  const [menu, setMenu] = useState<{ agentId: string; baseName: string; x: number; y: number } | null>(null);
+  const [menu, setMenu] = useState<{ agentId: string; baseName: string; spawned: boolean; x: number; y: number } | null>(null);
   const [editing, setEditing] = useState<{ agentId: string; value: string } | null>(null);
 
   const totalAgents = groups.reduce((n, g) => n + g.agents.length, 0);
@@ -198,7 +198,7 @@ export function AgentRosterPanel({ onSelectAgent, onOpenChat, onRespond }: {
                         onClick={() => { if (!isEditing) onSelectAgent({ projectId: a.projectId, agentId: a.agentId }); }}
                         onContextMenu={e => {
                           e.preventDefault();
-                          setMenu({ agentId: a.agentId, baseName: a.baseName, x: e.clientX, y: e.clientY });
+                          setMenu({ agentId: a.agentId, baseName: a.baseName, spawned: !!a.spawned, x: e.clientX, y: e.clientY });
                         }}
                       >
                         <span style={{
@@ -264,6 +264,17 @@ export function AgentRosterPanel({ onSelectAgent, onOpenChat, onRespond }: {
               style={{ ...menuItem, borderTop: '1px solid rgba(255,255,255,0.1)' }}
               onClick={() => { clearAgentName(menu.agentId); setMenu(null); }}
             >Réinitialiser le nom</div>
+          )}
+          {menu.spawned && (
+            <div
+              style={{ ...menuItem, borderTop: '1px solid rgba(255,255,255,0.1)', color: '#f87171' }}
+              onClick={() => {
+                if (window.confirm("Arrêter cet agent ? Sa session sera fermée et son personnage retiré.")) {
+                  stopAgent(menu.agentId);
+                }
+                setMenu(null);
+              }}
+            >Arrêter l'agent</div>
           )}
         </div>
       )}

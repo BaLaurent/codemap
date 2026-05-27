@@ -114,6 +114,12 @@ export interface PermissionResolvedInfo {
   requestId: string;
 }
 
+/** Tells clients an agent was explicitly killed, so they can play its death
+ *  animation and remove its character immediately (not after the grace period). */
+export interface AgentKilledInfo {
+  agentId: string;
+}
+
 /** A chat line for a hotel-spawned agent (user turn or assistant reply). */
 export interface ChatMessage {
   agentId: string;

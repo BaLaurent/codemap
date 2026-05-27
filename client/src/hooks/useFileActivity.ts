@@ -16,7 +16,8 @@ export function shouldApplyMessage(
 ): boolean {
   // Agent-keyed global messages always apply (no project scoping).
   if (message.type === 'thinking' || message.type === 'permission-request' ||
-      message.type === 'permission-resolved' || message.type === 'chat') return true;
+      message.type === 'permission-resolved' || message.type === 'chat' ||
+      message.type === 'agent-killed') return true;
   if (!watchedProjectId) return true;
   return message.projectId === watchedProjectId;
 }
@@ -44,6 +45,7 @@ export function useFileActivity(projectId?: string): {
   pendingRequestsRef: MutableRefObject<Map<string, PendingRequest>>;
   chatHistoryRef: MutableRefObject<Map<string, ChatMessage[]>>;
   chatVersionRef: MutableRefObject<number>;
+  killedAgentsRef: MutableRefObject<Set<string>>;
   connectionStatusRef: MutableRefObject<ConnectionStatus>;
   clearGraph: () => void;
 } {
@@ -63,6 +65,9 @@ export function useFileActivity(projectId?: string): {
   // Per-agent chat transcript for hotel-spawned agents; version bumps on new lines.
   const chatHistoryRef = useRef<Map<string, ChatMessage[]>>(new Map());
   const chatVersionRef = useRef(0);
+  // Agents the server just killed; HabboRoom drains this to play the death
+  // animation and remove the character immediately (no 30s grace wait).
+  const killedAgentsRef = useRef<Set<string>>(new Set());
   // Connection status for UI indicator
   const connectionStatusRef = useRef<ConnectionStatus>('connecting');
 
@@ -166,6 +171,9 @@ export function useFileActivity(projectId?: string): {
           const history = chatHistoryRef.current.get(msg.agentId) ?? [];
           chatHistoryRef.current.set(msg.agentId, [...history, msg]);
           chatVersionRef.current++;
+        } else if (message.type === 'agent-killed') {
+          const { agentId } = message.data as { agentId: string };
+          killedAgentsRef.current.add(agentId);
         }
       } catch (err) {
         console.error('Failed to parse message:', err);
@@ -207,6 +215,7 @@ export function useFileActivity(projectId?: string): {
     pendingRequestsRef,
     chatHistoryRef,
     chatVersionRef,
+    killedAgentsRef,
     connectionStatusRef,
     clearGraph
   };
