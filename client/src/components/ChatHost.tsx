@@ -7,6 +7,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { AgentChatPanel } from './AgentChatPanel';
 import { useAgentStream } from '../hooks/AgentStream';
 import { mergeTranscript } from '../utils/chat-transcript';
+import { getAgentName, AGENT_NAMES_CHANGED } from '../utils/agent-names';
 import type { AgentCapabilities, ChatMessage, GraphData, ModelOption, SlashCommand } from '../types';
 
 const API_URL = 'http://localhost:5174/api';
@@ -85,6 +86,15 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     return () => { cancelled = true; };
   }, [chatAgentId, chatHistoryRef, chatVersionRef, thinkingAgentsRef]);
 
+  // Refresh the panel title when the user renames the focused agent (the roster
+  // writes the custom name and dispatches this event).
+  useEffect(() => {
+    if (!chatAgentId) return;
+    const onRename = () => setChatTick(t => t + 1);
+    window.addEventListener(AGENT_NAMES_CHANGED, onRename);
+    return () => window.removeEventListener(AGENT_NAMES_CHANGED, onRename);
+  }, [chatAgentId]);
+
   // Poll the version ref (refs don't re-render) only while a chat is open, so the
   // panel refreshes on each new line without a permanent render loop.
   useEffect(() => {
@@ -139,7 +149,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         const agent = thinkingAgentsRef.current.find(a => a.agentId === chatAgentId);
         return (
           <AgentChatPanel
-            agentName={agent?.displayName || 'Agent'}
+            agentName={getAgentName(chatAgentId, agent?.displayName || 'Agent')}
             messages={history}
             dead={dead}
             commands={chatCommands}
