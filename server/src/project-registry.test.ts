@@ -58,3 +58,37 @@ describe('ProjectRegistry', () => {
     reg.dispose();
   });
 });
+
+describe('ProjectRegistry pinning', () => {
+  it('defaults workspaces to not pinned', () => {
+    const r = new ProjectRegistry();
+    r.getOrCreate('/p', '/p', 'p');
+    expect(r.list()[0].isPinned).toBe(false);
+    expect(r.listPinned()).toEqual([]);
+  });
+
+  it('setPinned flips the flag and listPinned reflects it', () => {
+    const r = new ProjectRegistry();
+    r.getOrCreate('/p', '/p', 'p');
+    r.setPinned('/p', true);
+    expect(r.list()[0].isPinned).toBe(true);
+    expect(r.listPinned()).toEqual([{ projectId: '/p', projectRoot: '/p', projectName: 'p' }]);
+  });
+
+  it('getOrCreate on an existing project keeps it pinned (idempotent)', () => {
+    const r = new ProjectRegistry();
+    r.getOrCreate('/p', '/p', 'p');
+    r.setPinned('/p', true);
+    r.getOrCreate('/p', '/p', 'p');
+    expect(r.list()).toHaveLength(1);
+    expect(r.list()[0].isPinned).toBe(true);
+  });
+
+  it('remove drops the workspace', () => {
+    const r = new ProjectRegistry();
+    r.getOrCreate('/p', '/p', 'p');
+    r.remove('/p');
+    expect(r.get('/p')).toBeUndefined();
+    expect(r.list()).toEqual([]);
+  });
+});

@@ -8,6 +8,7 @@ export interface ProjectWorkspace {
   store: ActivityStore;
   lastActivity: number;
   agentCount: number;
+  pinned: boolean;
 }
 
 /**
@@ -27,7 +28,7 @@ export class ProjectRegistry {
     if (w) return w;
     const store = new ActivityStore(projectRoot);
     store.onGraphChange((data) => this.graphChangeCallback?.(projectId, data));
-    w = { projectId, projectName, projectRoot, store, lastActivity: Date.now(), agentCount: 0 };
+    w = { projectId, projectName, projectRoot, store, lastActivity: Date.now(), agentCount: 0, pinned: false };
     this.workspaces.set(projectId, w);
     return w;
   }
@@ -52,7 +53,27 @@ export class ProjectRegistry {
       projectRoot: w.projectRoot,
       lastActivity: w.lastActivity,
       agentCount: w.agentCount,
+      isPinned: w.pinned,
     }));
+  }
+
+  setPinned(projectId: string, value: boolean): void {
+    const w = this.workspaces.get(projectId);
+    if (w) w.pinned = value;
+  }
+
+  // The persisted shape for pinned projects (re-created via getOrCreate at boot).
+  listPinned(): Array<{ projectId: string; projectRoot: string; projectName: string }> {
+    return Array.from(this.workspaces.values())
+      .filter(w => w.pinned)
+      .map(w => ({ projectId: w.projectId, projectRoot: w.projectRoot, projectName: w.projectName }));
+  }
+
+  remove(projectId: string): void {
+    const w = this.workspaces.get(projectId);
+    if (!w) return;
+    w.store.stopWatching();
+    this.workspaces.delete(projectId);
   }
 
   dispose(): void {
