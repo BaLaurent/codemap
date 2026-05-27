@@ -667,20 +667,23 @@ app.post('/api/agent/:agentId/model', async (req, res) => {
   res.status(200).json({ ok });
 });
 
-// Kill a spawned agent: end its SDK session AND remove its hotel character so it
-// doesn't linger in the room/roster. Runs even if the SDK session already died
-// (e.g. crashed) so a stale character can still be cleared.
-app.post('/api/agent/:agentId/stop', async (req, res) => {
-  const { agentId } = req.params;
+// Kill an agent: end its SDK session (if any) AND clear its hotel character so
+// it doesn't linger. Safe for external agents (no session) — the character is
+// still removed and the death animation plays. Used by the stop route and by
+// building removal.
+async function killAgent(agentId: string): Promise<boolean> {
   const ok = await stopAgent(agentId);
   if (agentStates.delete(agentId)) {
     refreshAgentCounts();
     saveAgentState();
     wsManager.broadcast('thinking', getAgentStatesArray());
-    // Tell clients to play the death animation at the character's last spot.
     wsManager.broadcast('agent-killed', { agentId });
   }
-  res.status(200).json({ ok });
+  return ok;
+}
+
+app.post('/api/agent/:agentId/stop', async (req, res) => {
+  res.status(200).json({ ok: await killAgent(req.params.agentId) });
 });
 
 // List all known projects (buildings in the town)
