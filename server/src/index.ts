@@ -569,7 +569,13 @@ app.post('/api/agent/spawn', (req, res) => {
   }
   const mode: PermissionMode = PERMISSION_MODES.includes(permissionMode) ? permissionMode : 'default';
   const agentId = randomUUID();
-  const workdir = typeof cwd === 'string' && cwd ? cwd : FALLBACK_PROJECT_ID;
+  // Resolve the working directory: an explicit cwd wins; otherwise spawn inside
+  // the open building. projectId is the project root in our identity scheme, but
+  // prefer the registry's authoritative projectRoot when the workspace is known.
+  const ws = typeof projectId === 'string' ? registry.get(projectId) : undefined;
+  const workdir = (typeof cwd === 'string' && cwd)
+    ? cwd
+    : ws?.projectRoot ?? (typeof projectId === 'string' && projectId ? projectId : FALLBACK_PROJECT_ID);
   // Pre-register so the character appears right away; hooks then animate it.
   const state = registerAgent(agentId, Date.now(), 'thinking', 'claude');
   if (!state) {
