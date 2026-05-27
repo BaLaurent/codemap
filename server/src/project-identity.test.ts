@@ -3,7 +3,7 @@ import { execFileSync } from 'child_process';
 import os from 'os';
 import fs from 'fs';
 import path from 'path';
-import { deriveProjectFromPath } from './project-identity.js';
+import { deriveProjectFromPath, deriveProjectFromDir } from './project-identity.js';
 
 describe('deriveProjectFromPath', () => {
   const dirs: string[] = [];
@@ -37,5 +37,30 @@ describe('deriveProjectFromPath', () => {
   it('never turns the ~/.claude tooling dir into a building', () => {
     const p = path.join(os.homedir(), '.claude', 'projects', 'x', 'memory', 'note.md');
     expect(deriveProjectFromPath(p, false)).toBeUndefined();
+  });
+});
+
+describe('deriveProjectFromDir', () => {
+  it('resolves a git repo to its toplevel', () => {
+    const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cm-git-')));
+    execFileSync('git', ['init'], { cwd: tmp, stdio: 'ignore' });
+    const sub = path.join(tmp, 'src');
+    fs.mkdirSync(sub);
+    const f = deriveProjectFromDir(sub);
+    expect(f).toEqual({ projectId: tmp, projectRoot: tmp, projectName: path.basename(tmp) });
+  });
+
+  it('falls back to the directory itself when not a git repo', () => {
+    const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cm-plain-')));
+    const f = deriveProjectFromDir(tmp);
+    expect(f).toEqual({ projectId: tmp, projectRoot: tmp, projectName: path.basename(tmp) });
+  });
+
+  it('rejects a non-project root (~/.claude)', () => {
+    expect(deriveProjectFromDir(path.join(os.homedir(), '.claude'))).toBeUndefined();
+  });
+
+  it('rejects a relative path', () => {
+    expect(deriveProjectFromDir('relative/dir')).toBeUndefined();
   });
 });
