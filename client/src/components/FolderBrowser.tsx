@@ -47,7 +47,7 @@ export function FolderBrowser({ onAdded, onClose }: { onAdded: () => void; onClo
   };
 
   return (
-    <div style={wrap} onKeyDown={e => { if (e.key === 'Escape') onClose(); }}>
+    <div style={wrap} tabIndex={-1} autoFocus onKeyDown={e => { if (e.key === 'Escape') onClose(); }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span style={{ fontWeight: 700 }}>📁 Ajouter un dossier</span>
         <button style={{ ...goldBtn, background: 'transparent', boxShadow: 'none', border: 'none' }} onClick={onClose} title="Fermer">✕</button>
