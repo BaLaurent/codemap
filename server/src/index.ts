@@ -544,6 +544,20 @@ app.post('/api/clear', (_req, res) => {
   res.json({ success: true });
 });
 
+// Manually clear all tracked agents (e.g. to remove leftover/test agents).
+// Non-destructive: real agents re-register on their next activity via hooks.
+// Persists immediately so a restart within the 30s save window doesn't restore
+// the agents we just cleared.
+app.post('/api/agents/clear', (_req, res) => {
+  const cleared = agentStates.size;
+  agentStates.clear();
+  refreshAgentCounts();
+  saveAgentState();
+  wsManager.broadcast('thinking', getAgentStatesArray());
+  console.log(`[${new Date().toISOString()}] Cleared ${cleared} agents (manual /api/agents/clear)`);
+  res.json({ success: true, cleared });
+});
+
 // Handle git commit notification - refresh layout for the committing project
 app.post('/api/git-commit', async (req, res) => {
   console.log(`[${new Date().toISOString()}] Git commit detected - refreshing layout`);

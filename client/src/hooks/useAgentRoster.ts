@@ -2,7 +2,7 @@
 // useFileActivity (ref-based, for the canvas loop), this hook exposes React
 // state so a DOM list re-renders when agents come and go. buildRoster is the
 // pure, testable core (same split as sortProjects / reduceNav).
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AgentThinkingState, ProjectInfo } from '../types';
 import { getAgentName, AGENT_NAMES_CHANGED } from '../utils/agent-names';
 
@@ -98,7 +98,12 @@ export function buildRoster(
   return groups;
 }
 
-export function useAgentRoster(): RosterGroup[] {
+export interface AgentRoster {
+  groups: RosterGroup[];
+  clearAgents: () => void;
+}
+
+export function useAgentRoster(): AgentRoster {
   const [groups, setGroups] = useState<RosterGroup[]>([]);
   const lastDataRef = useRef<{ agents: AgentThinkingState[]; projects: ProjectInfo[] }>({
     agents: [],
@@ -139,5 +144,13 @@ export function useAgentRoster(): RosterGroup[] {
     };
   }, []);
 
-  return groups;
+  // Drop all tracked agents server-side; empty the list optimistically for
+  // instant feedback (the next poll reconciles if a live agent re-registers).
+  const clearAgents = useCallback(() => {
+    fetch(`${API_URL}/agents/clear`, { method: 'POST' })
+      .then(() => setGroups([]))
+      .catch(() => {});
+  }, []);
+
+  return { groups, clearAgents };
 }

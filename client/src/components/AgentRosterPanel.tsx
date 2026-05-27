@@ -91,10 +91,15 @@ const menuItem: CSSProperties = {
   padding: '8px 14px', cursor: 'pointer', color: '#e5e7eb',
 };
 
+const clearBtn: CSSProperties = {
+  background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)',
+  color: '#e5e7eb', fontSize: 11, padding: '2px 8px', borderRadius: 6, cursor: 'pointer',
+};
+
 export function AgentRosterPanel({ onSelectAgent }: {
   onSelectAgent: (req: AgentFocusRequest) => void;
 }) {
-  const groups = useAgentRoster();
+  const { groups, clearAgents } = useAgentRoster();
   const [collapsed, setCollapsed] = useState(() => loadBool(COLLAPSED_KEY));
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => loadSet(GROUPS_KEY));
   const [menu, setMenu] = useState<{ agentId: string; baseName: string; x: number; y: number } | null>(null);
@@ -138,7 +143,16 @@ export function AgentRosterPanel({ onSelectAgent }: {
       <div style={panel}>
         <div style={header} onClick={togglePanel} title={collapsed ? 'Déplier' : 'Replier'}>
           <span>Agents ({totalAgents})</span>
-          <span>{collapsed ? '▸' : '▾'}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {totalAgents > 0 && (
+              <button
+                style={clearBtn}
+                title="Vider la liste des agents (ils réapparaîtront à leur prochaine activité)"
+                onClick={e => { e.stopPropagation(); clearAgents(); }}
+              >Vider</button>
+            )}
+            <span>{collapsed ? '▸' : '▾'}</span>
+          </div>
         </div>
 
         {!collapsed && (
