@@ -5,6 +5,8 @@ import { FloorNavBar } from './FloorNavBar';
 import { GraphNode, FolderScore } from '../types';
 import { playReadSound, playWriteSound, playWaitingSound, initAudio } from '../sounds';
 import { findMatchingFileId } from '../utils/screen-flash';
+import { resolveFocus } from '../utils/focus-resolver';
+import type { FocusRequest } from './AgentRosterPanel';
 
 const API_URL = 'http://localhost:5174/api';
 
@@ -34,7 +36,7 @@ import {
   drawCoffeeShop,
 } from '../drawing';
 
-export function HabboRoom({ projectId }: { projectId?: string } = {}) {
+export function HabboRoom({ projectId, focusRequest }: { projectId?: string; focusRequest?: FocusRequest | null } = {}) {
   // All data comes via refs - NO STATE, NO RE-RENDERS
   const {
     graphDataRef,
@@ -101,6 +103,14 @@ export function HabboRoom({ projectId }: { projectId?: string } = {}) {
   const trackedAgentIdRef = useRef<string | null>(null);
   const trackingZoom = 3; // Zoom level when tracking
   const baseOffsetsRef = useRef({ x: 0, y: 0 }); // Store base offsets for coordinate conversion
+
+  // Externally requested focus (from the agent roster panel). Held until the
+  // agent materializes on the canvas, then applied in the render loop.
+  const pendingFocusRef = useRef<string | null>(null);
+  useEffect(() => {
+    // Re-runs even for the same agentId because focusRequest.ts changes per click.
+    if (focusRequest) pendingFocusRef.current = focusRequest.agentId;
+  }, [focusRequest]);
 
   // Build floors by folder depth. Returns a single RoomLayout wrapping the
   // rooms of ALL floors (gating to one floor happens in a later task).
@@ -790,6 +800,19 @@ export function HabboRoom({ projectId }: { projectId?: string } = {}) {
         const pan = panRef.current;
         const centerX = canvas.width / 2;
         const centerY = canvas.height / 2;
+
+        // Apply a pending external focus request once that agent exists on the
+        // canvas. selectAgent picks its floor (and sets follow=true, so the view
+        // catches up to the agent's floor on its next activity); tracking then
+        // centers/zooms the camera.
+        if (pendingFocusRef.current) {
+          const focusId = resolveFocus(pendingFocusRef.current, new Set(agentCharactersRef.current.keys()));
+          if (focusId) {
+            nav.selectAgent(focusId);
+            trackedAgentIdRef.current = focusId;
+            pendingFocusRef.current = null;
+          }
+        }
 
         // Agent tracking mode - smoothly follow the tracked agent
         if (trackedAgentIdRef.current) {

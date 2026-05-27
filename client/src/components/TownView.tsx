@@ -3,13 +3,17 @@ import { useProjects } from '../hooks/useProjects';
 import { layoutTown, BUILDING_SIZE, PlacedBuilding } from '../layout/town-layout';
 import { drawBuilding } from '../drawing';
 import { HabboRoom } from './HabboRoom';
+import type { FocusRequest } from './AgentRosterPanel';
 
 // Controlled by the parent: `selected` is the project being viewed (null = town
 // overview), `onSelect` flips it. The "Town" back control lives in the parent's
 // nav cluster, so this component only renders the town canvas or the interior.
-export function TownView({ selected, onSelect }: {
+// `focusRequest` is forwarded to the interior so the roster panel can fly the
+// camera to a specific agent.
+export function TownView({ selected, onSelect, focusRequest }: {
   selected: string | null;
   onSelect: (projectId: string | null) => void;
+  focusRequest?: FocusRequest | null;
 }) {
   const { projectsRef } = useProjects();
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -79,7 +83,13 @@ export function TownView({ selected, onSelect }: {
   }, [selected, projectsRef, onSelect]);
 
   if (selected) {
-    return <HabboRoom projectId={selected} />;
+    // key={selected} forces a fresh HabboRoom when jumping straight from one
+    // building to another (e.g. via the roster panel). Without it React reuses
+    // the instance and its refs stay pinned to the previous building, so the
+    // target agent never materializes and the camera never moves. Re-mounting
+    // gives a clean scene; focusRequest (a prop) is read on mount and applied
+    // once the agent appears.
+    return <HabboRoom key={selected} projectId={selected} focusRequest={focusRequest} />;
   }
 
   return <canvas ref={canvasRef} style={{ display: 'block' }} />;

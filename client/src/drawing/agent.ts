@@ -1,6 +1,7 @@
 // Agent character drawing function
 import { AgentCharacter } from './types';
 import { CHARACTER_PALETTES, SKIN, OUTLINE } from './palette';
+import { getAgentName } from '../utils/agent-names';
 
 // Draw a single agent character with animations
 export const drawAgentCharacter = (ctx: CanvasRenderingContext2D, char: AgentCharacter) => {
@@ -155,13 +156,15 @@ export const drawAgentCharacter = (ctx: CanvasRenderingContext2D, char: AgentCha
 
   ctx.restore();
 
-  // Name label (not scaled)
+  // Name label (not scaled). Honors a user-assigned custom name; falls back to
+  // the server display name. Reads an in-memory cache, safe on this 30fps path.
+  const label = getAgentName(char.agentId, char.displayName);
   ctx.font = 'bold 10px monospace';
   ctx.textAlign = 'center';
   ctx.fillStyle = 'rgba(0,0,0,0.5)';
-  ctx.fillText(char.displayName, cx + 1, cy - 50);
+  ctx.fillText(label, cx + 1, cy - 50);
   ctx.fillStyle = '#FFFFFF';
-  ctx.fillText(char.displayName, cx, cy - 51);
+  ctx.fillText(label, cx, cy - 51);
 
   // Model label (below name, smaller, gray)
   if (char.model) {

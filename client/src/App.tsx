@@ -5,6 +5,7 @@ import { BrowserRouter, Routes, Route, Link } from 'react-router-dom';
 import { FileGraph } from './components/FileGraph';
 import { ActivityLegend } from './components/ActivityLegend';
 import { TownView } from './components/TownView';
+import { AgentRosterPanel, type AgentFocusRequest, type FocusRequest } from './components/AgentRosterPanel';
 import { getMuted, setMuted } from './sounds';
 
 // Mute button component
@@ -84,9 +85,19 @@ const navLinkStyle: React.CSSProperties = {
 // nav cluster alongside Tree/Hotel rather than floating on its own.
 function HotelView() {
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
+  const [focusRequest, setFocusRequest] = useState<FocusRequest | null>(null);
+
+  // Clicking an agent in the roster: enter its building (if known) and stamp a
+  // fresh focus request so HabboRoom flies the camera to it.
+  const handleSelectAgent = ({ projectId, agentId }: AgentFocusRequest) => {
+    if (projectId) setSelectedProject(projectId);
+    setFocusRequest({ projectId, agentId, ts: Date.now() });
+  };
+
   return (
     <>
-      <TownView selected={selectedProject} onSelect={setSelectedProject} />
+      <TownView selected={selectedProject} onSelect={setSelectedProject} focusRequest={focusRequest} />
+      <AgentRosterPanel onSelectAgent={handleSelectAgent} />
       <div style={{
         position: 'absolute',
         top: 16,
