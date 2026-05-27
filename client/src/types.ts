@@ -117,6 +117,7 @@ export interface ProjectInfo {
   projectRoot: string;
   lastActivity: number;
   agentCount: number;
+  isPinned: boolean;
 }
 
 export interface GraphNode {

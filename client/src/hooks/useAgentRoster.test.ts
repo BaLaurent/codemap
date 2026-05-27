@@ -36,8 +36,8 @@ describe('deriveState', () => {
 
 describe('buildRoster', () => {
   const projects: ProjectInfo[] = [
-    { projectId: 'p1', projectName: 'Toto', projectRoot: '/toto', lastActivity: NOW, agentCount: 1 },
-    { projectId: 'p2', projectName: 'Tutu', projectRoot: '/tutu', lastActivity: NOW, agentCount: 1 },
+    { projectId: 'p1', projectName: 'Toto', projectRoot: '/toto', lastActivity: NOW, agentCount: 1, isPinned: false },
+    { projectId: 'p2', projectName: 'Tutu', projectRoot: '/tutu', lastActivity: NOW, agentCount: 1, isPinned: false },
   ];
 
   it('groups agents by project and resolves the project name', () => {

@@ -3,7 +3,7 @@ import { sortProjects } from './useProjects';
 import { ProjectInfo } from '../types';
 
 const p = (id: string, name: string, last: number): ProjectInfo =>
-  ({ projectId: id, projectName: name, projectRoot: id, lastActivity: last, agentCount: 0 });
+  ({ projectId: id, projectName: name, projectRoot: id, lastActivity: last, agentCount: 0, isPinned: false });
 
 describe('sortProjects', () => {
   it('orders by lastActivity desc then name asc', () => {

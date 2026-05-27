@@ -3,7 +3,7 @@ import { layoutTown, BUILDINGS_PER_ROW } from './town-layout';
 import { ProjectInfo } from '../types';
 
 const p = (id: string, name: string): ProjectInfo =>
-  ({ projectId: id, projectName: name, projectRoot: id, lastActivity: 0, agentCount: 0 });
+  ({ projectId: id, projectName: name, projectRoot: id, lastActivity: 0, agentCount: 0, isPinned: false });
 
 describe('layoutTown', () => {
   it('places buildings left-to-right, wrapping into rows', () => {
