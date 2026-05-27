@@ -86,6 +86,7 @@ export interface AgentThinkingState {
                          // Sticky across non-file commands (e.g. Bash) so the agent stays put.
   waitingForInput?: boolean;  // True when agent is waiting for user input
   question?: AgentQuestion;  // Real question the agent is asking (from AskUserQuestion)
+  spawned?: boolean;  // True for agents launched from the hotel (chattable via the panel)
   pendingToolStart?: number;  // Timestamp when tool started (for detecting stuck permission prompts)
   agentType?: string;  // Agent type (e.g., "Plan", "Explore", "Bash") - shown in display name
   model?: string;  // Model name (e.g., "claude-3.5-sonnet") - shown below agent name
@@ -111,6 +112,14 @@ export interface PendingRequestInfo {
 export interface PermissionResolvedInfo {
   agentId: string;
   requestId: string;
+}
+
+/** A chat line for a hotel-spawned agent (user turn or assistant reply). */
+export interface ChatMessage {
+  agentId: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  timestamp: number;
 }
 
 /** The decision the hotel sends back, returned to the blocking hook's long-poll. */

@@ -5,7 +5,7 @@ import { BrowserRouter, Routes, Route, Link } from 'react-router-dom';
 import { FileGraph } from './components/FileGraph';
 import { ActivityLegend } from './components/ActivityLegend';
 import { TownView } from './components/TownView';
-import { AgentRosterPanel, type AgentFocusRequest, type FocusRequest } from './components/AgentRosterPanel';
+import { AgentRosterPanel, type AgentFocusRequest, type FocusRequest, type ActionRequest } from './components/AgentRosterPanel';
 import { getMuted, setMuted } from './sounds';
 
 // Mute button component
@@ -86,6 +86,7 @@ const navLinkStyle: React.CSSProperties = {
 function HotelView() {
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [focusRequest, setFocusRequest] = useState<FocusRequest | null>(null);
+  const [actionRequest, setActionRequest] = useState<ActionRequest | null>(null);
 
   // Clicking an agent in the roster: enter its building (if known) and stamp a
   // fresh focus request so HabboRoom flies the camera to it.
@@ -94,10 +95,16 @@ function HotelView() {
     setFocusRequest({ projectId, agentId, ts: Date.now() });
   };
 
+  // Roster chat / respond buttons: open the panel or modal WITHOUT moving the
+  // camera (no building switch, no focus change). Data is global, so it works
+  // even for an agent in another building.
+  const handleOpenChat = (agentId: string) => setActionRequest({ agentId, action: 'chat', ts: Date.now() });
+  const handleRespond = (agentId: string) => setActionRequest({ agentId, action: 'respond', ts: Date.now() });
+
   return (
     <>
-      <TownView selected={selectedProject} onSelect={setSelectedProject} focusRequest={focusRequest} />
-      <AgentRosterPanel onSelectAgent={handleSelectAgent} />
+      <TownView selected={selectedProject} onSelect={setSelectedProject} focusRequest={focusRequest} actionRequest={actionRequest} />
+      <AgentRosterPanel onSelectAgent={handleSelectAgent} onOpenChat={handleOpenChat} onRespond={handleRespond} />
       <div style={{
         position: 'absolute',
         top: 16,

@@ -18,6 +18,15 @@ export interface FocusRequest extends AgentFocusRequest {
   ts: number;
 }
 
+// Open an agent's chat or its pending interaction WITHOUT moving the camera.
+export interface AgentActionRequest {
+  agentId: string;
+  action: 'chat' | 'respond';
+}
+export interface ActionRequest extends AgentActionRequest {
+  ts: number;
+}
+
 const COLLAPSED_KEY = 'codemap-roster-collapsed';
 const GROUPS_KEY = 'codemap-roster-groups-collapsed';
 
@@ -96,8 +105,16 @@ const clearBtn: CSSProperties = {
   color: '#e5e7eb', fontSize: 11, padding: '2px 8px', borderRadius: 6, cursor: 'pointer',
 };
 
-export function AgentRosterPanel({ onSelectAgent }: {
+const actionBtn: CSSProperties = {
+  background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)',
+  color: '#e5e7eb', fontSize: 13, lineHeight: 1, padding: '3px 6px', borderRadius: 6,
+  cursor: 'pointer', flexShrink: 0,
+};
+
+export function AgentRosterPanel({ onSelectAgent, onOpenChat, onRespond }: {
   onSelectAgent: (req: AgentFocusRequest) => void;
+  onOpenChat?: (agentId: string) => void;
+  onRespond?: (agentId: string) => void;
 }) {
   const { groups, clearAgents } = useAgentRoster();
   const [collapsed, setCollapsed] = useState(() => loadBool(COLLAPSED_KEY));
@@ -215,6 +232,14 @@ export function AgentRosterPanel({ onSelectAgent }: {
                                 {a.currentCommand ? `${a.currentCommand} · ` : ''}{formatAge(now - a.lastActivity)}
                               </div>
                             </>
+                          )}
+                        </div>
+                        <div style={{ display: 'flex', gap: 4 }} onClick={e => e.stopPropagation()}>
+                          {a.spawned && onOpenChat && (
+                            <button style={actionBtn} title="Ouvrir le chat" onClick={() => onOpenChat(a.agentId)}>💬</button>
+                          )}
+                          {a.state === 'waiting' && onRespond && (
+                            <button style={actionBtn} title="Répondre à la demande" onClick={() => onRespond(a.agentId)}>🔔</button>
                           )}
                         </div>
                       </div>

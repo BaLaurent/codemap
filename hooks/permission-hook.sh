@@ -50,9 +50,11 @@ HTTP=$(/usr/bin/curl -s -o /dev/null -w '%{http_code}' --max-time 2 \
 
 echo "$(date): [permission] waiting event=$EVENT kind=$KIND agent=${AGENT_ID:0:8} tool=$TOOL_NAME" >> "$LOG_FILE"
 
-# Long-poll for the user's decision (server holds up to maxWaitMs, then 'timeout').
-RESP=$(/usr/bin/curl -s --max-time 35 \
-    "$SERVER/api/agent/$AGENT_ID/pending-permission?requestId=$REQUEST_ID&maxWaitMs=30000" 2>/dev/null)
+# Long-poll for the user's decision. Give the user real time to answer in the
+# hotel (5 min) — well under Claude Code's 600s hook timeout. On timeout the hook
+# defers to the native flow.
+RESP=$(/usr/bin/curl -s --max-time 320 \
+    "$SERVER/api/agent/$AGENT_ID/pending-permission?requestId=$REQUEST_ID&maxWaitMs=300000" 2>/dev/null)
 OUTCOME=$(echo "$RESP" | /usr/bin/jq -r '.outcome // "timeout"' 2>/dev/null)
 
 echo "$(date): [permission] outcome=$OUTCOME event=$EVENT agent=${AGENT_ID:0:8}" >> "$LOG_FILE"

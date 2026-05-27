@@ -8,9 +8,11 @@ import os from 'os';
 import { ProjectRegistry } from './project-registry.js';
 import { deriveProjectFromPath } from './project-identity.js';
 import { getHotFolders, clearCache as clearGitCache } from './git-activity.js';
-import { FileActivityEvent, ThinkingEvent, AgentThinkingState, InteractionOutcome } from './types.js';
+import { randomUUID } from 'node:crypto';
+import { FileActivityEvent, ThinkingEvent, AgentThinkingState, InteractionOutcome, ChatMessage } from './types.js';
 import { fileFromActivityEvent } from './agent-file.js';
 import { registerRequest, awaitDecision, resolveRequest } from './pending-requests.js';
+import { spawnAgent, sendMessage as runnerSendMessage, stopAgent } from './agent-runner/index.js';
 
 const PORT = 5174; // Fixed port - never change
 
@@ -490,7 +492,8 @@ app.post('/api/agent/:agentId/permission-request', (req, res) => {
 app.get('/api/agent/:agentId/pending-permission', async (req, res) => {
   const { agentId } = req.params;
   const requestId = String(req.query.requestId ?? '');
-  const maxWaitMs = Math.min(Number(req.query.maxWaitMs) || 30000, 120000);
+  // Cap under Claude Code's ~600s hook timeout; the hook asks for 5 min.
+  const maxWaitMs = Math.min(Number(req.query.maxWaitMs) || 30000, 590000);
   const outcome = await awaitDecision(agentId, requestId, maxWaitMs);
   res.status(200).json(outcome);
 });
@@ -515,6 +518,64 @@ app.post('/api/agent/:agentId/permission', (req, res) => {
     wsManager.broadcast('permission-resolved', { agentId, requestId });
   }
   res.status(200).json({ resolved });
+});
+
+// --- Hotel-spawned agents (Phase C) ----------------------------------------
+// Spawn a Claude agent in-process and chat with it from the hotel. Its own hooks
+// report under the forced sessionId, so it shows up as a normal hotel character.
+function broadcastChat(agentId: string, role: ChatMessage['role'], content: string): void {
+  wsManager.broadcast('chat', { agentId, role, content, timestamp: Date.now() });
+}
+
+app.post('/api/agent/spawn', (req, res) => {
+  const { projectId, cwd, initialPrompt } = req.body ?? {};
+  if (!initialPrompt || typeof initialPrompt !== 'string') {
+    res.status(400).json({ error: 'initialPrompt required' });
+    return;
+  }
+  const agentId = randomUUID();
+  const workdir = typeof cwd === 'string' && cwd ? cwd : FALLBACK_PROJECT_ID;
+  // Pre-register so the character appears right away; hooks then animate it.
+  const state = registerAgent(agentId, Date.now(), 'thinking', 'claude');
+  if (!state) {
+    res.status(429).json({ error: 'could not register agent (rate limit or capacity)' });
+    return;
+  }
+  if (typeof projectId === 'string') state.projectId = projectId;
+  state.spawned = true;  // chattable from the roster
+  refreshAgentCounts();
+  wsManager.broadcast('thinking', getAgentStatesArray());
+
+  broadcastChat(agentId, 'user', initialPrompt);
+  spawnAgent(
+    { agentId, cwd: workdir, projectId: typeof projectId === 'string' ? projectId : undefined, initialPrompt },
+    {
+      onChat: (id, role, content) => broadcastChat(id, role, content),
+      onError: (id, message) => broadcastChat(id, 'system', `⚠️ ${message}`),
+      onEnd: (id) => broadcastChat(id, 'system', '— session terminée —'),
+    },
+  );
+  console.log(`[${new Date().toISOString()}] SPAWNED agent ${state.displayName} (${agentId}) in ${workdir}`);
+  res.status(200).json({ agentId });
+});
+
+// Push a new user turn into a live spawned session.
+app.post('/api/agent/:agentId/message', (req, res) => {
+  const { agentId } = req.params;
+  const content = req.body?.content;
+  if (!content || typeof content !== 'string') {
+    res.status(400).json({ error: 'content required' });
+    return;
+  }
+  broadcastChat(agentId, 'user', content);
+  const ok = runnerSendMessage(agentId, content);
+  res.status(200).json({ ok });
+});
+
+// Interrupt and close a spawned session.
+app.post('/api/agent/:agentId/stop', async (req, res) => {
+  const ok = await stopAgent(req.params.agentId);
+  res.status(200).json({ ok });
 });
 
 // List all known projects (buildings in the town)

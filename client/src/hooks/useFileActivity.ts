@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback, MutableRefObject } from 'react';
-import { GraphData, FileActivityEvent, AgentThinkingState, PendingRequest } from '../types';
+import { GraphData, FileActivityEvent, AgentThinkingState, PendingRequest, ChatMessage } from '../types';
 
 const WS_URL = 'ws://localhost:5174/ws';
 const API_URL = 'http://localhost:5174/api';
@@ -15,7 +15,8 @@ export function shouldApplyMessage(
   watchedProjectId: string | undefined
 ): boolean {
   // Agent-keyed global messages always apply (no project scoping).
-  if (message.type === 'thinking' || message.type === 'permission-request' || message.type === 'permission-resolved') return true;
+  if (message.type === 'thinking' || message.type === 'permission-request' ||
+      message.type === 'permission-resolved' || message.type === 'chat') return true;
   if (!watchedProjectId) return true;
   return message.projectId === watchedProjectId;
 }
@@ -41,6 +42,8 @@ export function useFileActivity(projectId?: string): {
   thinkingVersionRef: MutableRefObject<number>;
   layoutVersionRef: MutableRefObject<number>;
   pendingRequestsRef: MutableRefObject<Map<string, PendingRequest>>;
+  chatHistoryRef: MutableRefObject<Map<string, ChatMessage[]>>;
+  chatVersionRef: MutableRefObject<number>;
   connectionStatusRef: MutableRefObject<ConnectionStatus>;
   clearGraph: () => void;
 } {
@@ -57,6 +60,9 @@ export function useFileActivity(projectId?: string): {
   // Allow/Deny modal and route the decision back. Read at answer time, so no
   // version counter needed.
   const pendingRequestsRef = useRef<Map<string, PendingRequest>>(new Map());
+  // Per-agent chat transcript for hotel-spawned agents; version bumps on new lines.
+  const chatHistoryRef = useRef<Map<string, ChatMessage[]>>(new Map());
+  const chatVersionRef = useRef(0);
   // Connection status for UI indicator
   const connectionStatusRef = useRef<ConnectionStatus>('connecting');
 
@@ -155,6 +161,11 @@ export function useFileActivity(projectId?: string): {
         } else if (message.type === 'permission-resolved') {
           const { agentId } = message.data as { agentId: string; requestId: string };
           pendingRequestsRef.current.delete(agentId);
+        } else if (message.type === 'chat') {
+          const msg = message.data as ChatMessage;
+          const history = chatHistoryRef.current.get(msg.agentId) ?? [];
+          chatHistoryRef.current.set(msg.agentId, [...history, msg]);
+          chatVersionRef.current++;
         }
       } catch (err) {
         console.error('Failed to parse message:', err);
@@ -170,6 +181,11 @@ export function useFileActivity(projectId?: string): {
         clearTimeout(reconnectTimeoutRef.current);
       }
       if (wsRef.current) {
+        // Detach onclose first: an intentional close must NOT schedule a
+        // reconnect. Otherwise (e.g. StrictMode mount/unmount/remount) the closed
+        // socket's onclose fires later and spawns a second live connection, so
+        // every broadcast is received twice (visible as duplicated chat lines).
+        wsRef.current.onclose = null;
         wsRef.current.close();
       }
     };
@@ -189,6 +205,8 @@ export function useFileActivity(projectId?: string): {
     thinkingVersionRef,
     layoutVersionRef,
     pendingRequestsRef,
+    chatHistoryRef,
+    chatVersionRef,
     connectionStatusRef,
     clearGraph
   };

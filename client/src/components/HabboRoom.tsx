@@ -1,13 +1,14 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { useFileActivity } from '../hooks/useFileActivity';
 import { useFloorNavigation } from '../hooks/useFloorNavigation';
 import { FloorNavBar } from './FloorNavBar';
 import { InteractionModal, formatAnswers, type QuestionAnswer } from './InteractionModal';
+import { AgentChatPanel } from './AgentChatPanel';
 import { GraphNode, FolderScore, type AgentQuestion } from '../types';
 import { playReadSound, playWriteSound, playWaitingSound, initAudio } from '../sounds';
 import { findMatchingFileId } from '../utils/screen-flash';
 import { resolveFocus } from '../utils/focus-resolver';
-import type { FocusRequest } from './AgentRosterPanel';
+import type { FocusRequest, ActionRequest } from './AgentRosterPanel';
 
 const API_URL = 'http://localhost:5174/api';
 
@@ -37,7 +38,7 @@ import {
   drawCoffeeShop,
 } from '../drawing';
 
-export function HabboRoom({ projectId, focusRequest }: { projectId?: string; focusRequest?: FocusRequest | null } = {}) {
+export function HabboRoom({ projectId, focusRequest, actionRequest }: { projectId?: string; focusRequest?: FocusRequest | null; actionRequest?: ActionRequest | null } = {}) {
   // All data comes via refs - NO STATE, NO RE-RENDERS
   const {
     graphDataRef,
@@ -47,6 +48,8 @@ export function HabboRoom({ projectId, focusRequest }: { projectId?: string; foc
     thinkingVersionRef,
     layoutVersionRef,
     pendingRequestsRef,
+    chatHistoryRef,
+    chatVersionRef,
     connectionStatusRef
   } = useFileActivity(projectId);
 
@@ -68,6 +71,42 @@ export function HabboRoom({ projectId, focusRequest }: { projectId?: string; foc
     | { mode: 'permission'; toolName?: string; toolInput?: string }
   );
   const [modalTarget, setModalTarget] = useState<ModalTarget | null>(null);
+
+  // Chat panel for a hotel-spawned agent. chatTick forces a re-render when a new
+  // chat line arrives (the WS data lives in chatHistoryRef); spawn UI state below.
+  const [chatAgentId, setChatAgentId] = useState<string | null>(null);
+  const [, setChatTick] = useState(0);
+  const lastChatVersionRef = useRef(0);
+  const [spawnOpen, setSpawnOpen] = useState(false);
+  const [spawnDraft, setSpawnDraft] = useState('');
+
+  // Open an agent's pending interaction modal from global state (works without
+  // tracking it or even viewing its building). Reads thinkingAgentsRef (question
+  // + name) and pendingRequestsRef (permission), both global.
+  const openInteractionFor = useCallback((agentId: string) => {
+    const agent = thinkingAgentsRef.current.find(a => a.agentId === agentId);
+    if (!agent) return;
+    const pending = pendingRequestsRef.current.get(agentId);
+    if (pending?.kind === 'permission') {
+      setModalTarget({
+        agentId, displayName: agent.displayName, requestId: pending.requestId,
+        mode: 'permission', toolName: pending.toolName, toolInput: pending.toolInput,
+      });
+    } else if (agent.question?.questions?.length) {
+      setModalTarget({
+        agentId, displayName: agent.displayName, requestId: pending?.requestId,
+        mode: 'question', question: agent.question,
+      });
+    }
+  }, [thinkingAgentsRef, pendingRequestsRef]);
+
+  // Roster "chat" / "respond" buttons: open the panel or modal without moving
+  // the camera. Stamped ts re-triggers even for the same agent.
+  useEffect(() => {
+    if (!actionRequest) return;
+    if (actionRequest.action === 'chat') setChatAgentId(actionRequest.agentId);
+    else if (actionRequest.action === 'respond') openInteractionFor(actionRequest.agentId);
+  }, [actionRequest, openInteractionFor]);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const agentCharactersRef = useRef<Map<string, AgentCharacter>>(new Map());
@@ -494,6 +533,12 @@ export function HabboRoom({ projectId, focusRequest }: { projectId?: string; foc
         lastLayoutVersionRef.current = layoutVersionRef.current;
         console.log('Git commit detected - refreshing layout');
         fetchHotFolders();
+      }
+
+      // Re-render the chat panel when a new chat line arrives (data is in a ref).
+      if (chatVersionRef.current !== lastChatVersionRef.current) {
+        lastChatVersionRef.current = chatVersionRef.current;
+        setChatTick(t => t + 1);
       }
 
       // === SYNC AGENTS (replaces useEffect) ===
@@ -1329,21 +1374,14 @@ export function HabboRoom({ projectId, focusRequest }: { projectId?: string; foc
       if (clickedAgentId) {
         // Start tracking this agent
         trackedAgentIdRef.current = clickedAgentId;
-        // If it's waiting on the user, open the matching modal: a tool permission
-        // (Allow/Deny) takes priority, else an AskUserQuestion answer.
-        const char = agentCharactersRef.current.get(clickedAgentId);
-        const pending = pendingRequestsRef.current.get(clickedAgentId);
-        if (char?.waitingForInput && pending?.kind === 'permission') {
-          setModalTarget({
-            agentId: clickedAgentId, displayName: char.displayName, requestId: pending.requestId,
-            mode: 'permission', toolName: pending.toolName, toolInput: pending.toolInput,
-          });
-        } else if (char?.waitingForInput && char.question?.questions?.length) {
-          setModalTarget({
-            agentId: clickedAgentId, displayName: char.displayName, requestId: pending?.requestId,
-            mode: 'question', question: char.question,
-          });
+        // Spawned agents (those with a chat transcript) open their chat panel.
+        if (chatHistoryRef.current.has(clickedAgentId)) {
+          setChatAgentId(clickedAgentId);
         }
+        // If it's waiting on the user, open its interaction modal (permission or
+        // question — openInteractionFor decides from global state).
+        const char = agentCharactersRef.current.get(clickedAgentId);
+        if (char?.waitingForInput) openInteractionFor(clickedAgentId);
       } else if (trackedAgentIdRef.current) {
         // Clicked elsewhere while tracking - exit tracking mode
         trackedAgentIdRef.current = null;
@@ -1403,6 +1441,26 @@ export function HabboRoom({ projectId, focusRequest }: { projectId?: string; foc
     pendingRequestsRef.current.delete(agentId);
   };
 
+  // Spawn a Claude agent from the hotel and open its chat; send/stop turns.
+  const spawnAgentFromHotel = (initialPrompt: string) => {
+    fetch(`${API_URL}/agent/spawn`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ initialPrompt, projectId }),
+    })
+      .then(r => r.json())
+      .then((d: { agentId?: string }) => { if (d.agentId) setChatAgentId(d.agentId); })
+      .catch(console.error);
+  };
+  const sendChat = (agentId: string, content: string) => {
+    fetch(`${API_URL}/agent/${agentId}/message`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content }),
+    }).catch(console.error);
+  };
+  const stopChat = (agentId: string) => {
+    fetch(`${API_URL}/agent/${agentId}/stop`, { method: 'POST' }).catch(console.error);
+  };
+
   return (
     <div style={{ width: '100vw', height: '100vh', overflow: 'hidden', backgroundColor: '#C8E8F8' }}>
       <div style={{
@@ -1459,6 +1517,52 @@ export function HabboRoom({ projectId, focusRequest }: { projectId?: string; foc
             }
             setModalTarget(null);
           }}
+        />
+      )}
+
+      {/* Spawn-an-agent control (bottom-left) */}
+      <div style={{ position: 'absolute', left: 16, bottom: 16, zIndex: 25, fontFamily: 'monospace' }}>
+        {spawnOpen ? (
+          <div style={{
+            display: 'flex', gap: 6, alignItems: 'center', background: '#FFF8E6',
+            border: '4px solid #4A3B1A', boxShadow: '6px 6px 0 rgba(0,0,0,0.35)', padding: 8,
+          }}>
+            <input
+              autoFocus
+              style={{ width: 280, boxSizing: 'border-box', padding: '6px 8px', fontFamily: 'monospace', fontSize: 13, color: '#3A2E12', background: '#fff', border: '2px solid #4A3B1A' }}
+              placeholder="Tâche pour le nouvel agent…"
+              value={spawnDraft}
+              onChange={e => setSpawnDraft(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') {
+                  const t = spawnDraft.trim();
+                  if (t) { spawnAgentFromHotel(t); setSpawnDraft(''); setSpawnOpen(false); }
+                } else if (e.key === 'Escape') { setSpawnOpen(false); setSpawnDraft(''); }
+              }}
+            />
+            <button
+              style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: 13, padding: '6px 12px', color: '#3A2E12', background: '#FFE040', border: '3px solid #4A3B1A', boxShadow: '2px 2px 0 rgba(0,0,0,0.3)', cursor: 'pointer' }}
+              onClick={() => { const t = spawnDraft.trim(); if (t) { spawnAgentFromHotel(t); setSpawnDraft(''); setSpawnOpen(false); } }}
+            >Lancer</button>
+          </div>
+        ) : (
+          <button
+            style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: 13, padding: '8px 14px', color: '#3A2E12', background: '#FFE040', border: '3px solid #4A3B1A', boxShadow: '3px 3px 0 rgba(0,0,0,0.3)', cursor: 'pointer' }}
+            onClick={() => setSpawnOpen(true)}
+            title="Invoquer un agent Claude depuis l'hôtel"
+          >🪄 Spawn agent</button>
+        )}
+      </div>
+
+      {chatAgentId && (
+        <AgentChatPanel
+          agentName={
+            thinkingAgentsRef.current.find(a => a.agentId === chatAgentId)?.displayName || 'Agent'
+          }
+          messages={chatHistoryRef.current.get(chatAgentId) ?? []}
+          onSend={content => sendChat(chatAgentId, content)}
+          onStop={() => { stopChat(chatAgentId); setChatAgentId(null); }}
+          onClose={() => setChatAgentId(null)}
         />
       )}
     </div>

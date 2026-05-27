@@ -48,6 +48,14 @@ export interface PendingRequest {
   toolInput?: string;  // permission only
 }
 
+/** A chat line for a hotel-spawned agent (user turn or assistant/system reply). */
+export interface ChatMessage {
+  agentId: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  timestamp: number;
+}
+
 export interface AgentThinkingState {
   agentId: string;
   projectId?: string;  // Which building/project this agent belongs to
@@ -61,6 +69,7 @@ export interface AgentThinkingState {
                          // and bubble file line. Sticky across non-file commands.
   waitingForInput?: boolean;  // True when agent is waiting for user input
   question?: AgentQuestion;  // Real question the agent is asking (from AskUserQuestion)
+  spawned?: boolean;  // Launched from the hotel (chattable via the panel)
   agentType?: string;  // Agent type (Plan, Explore, Bash, etc.)
   model?: string;  // Model name (e.g., "claude-3.5-sonnet")
   lastDuration?: number;  // Last operation duration in ms

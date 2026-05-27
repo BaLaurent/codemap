@@ -25,6 +25,7 @@ export interface RosterEntry {
   state: RosterState;
   currentCommand?: string;
   toolInput?: string;
+  spawned?: boolean;  // launched from the hotel → chattable
   lastActivity: number;
 }
 
@@ -78,6 +79,7 @@ export function buildRoster(
       state: deriveState(agent, now),
       currentCommand: agent.currentCommand,
       toolInput: agent.toolInput,
+      spawned: agent.spawned,
       lastActivity: agent.lastActivity,
     });
   }
