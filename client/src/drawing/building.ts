@@ -1,3 +1,5 @@
+import { seededRandom, adjustBrightness } from './utils';
+
 export interface BuildingFacadeOpts {
   x: number; y: number; w: number; h: number;
   name: string;
@@ -5,33 +7,58 @@ export interface BuildingFacadeOpts {
   agentCount: number;   // lit windows
   active: boolean;      // recently active → brighter
   hovered: boolean;
+  seed: number;         // stable per project → picks the facade variant
 }
 
-// Pixel-art building facade: flat fills, dark outlines. Height of the window
-// grid scales with floorCount; lit windows scale with agentCount; a sign shows
-// the project name.
+// Warm, daytime palette matching the hotel interior. Each project draws a
+// deterministic variant (body colour, roof shape, window columns, awning) so
+// buildings stop looking like clones.
+const BODY_COLORS = ['#E8C8A0', '#D8A878', '#C8B8E0', '#A8C8B0', '#E0B0A0', '#C8D0B0'];
+const ROOF_COLORS = ['#B05038', '#8B6F47', '#5A7D8C', '#A05A7D', '#C87838'];
+const GLASS_UNLIT = '#A8D0E8';  // hotel window glass (was near-black)
+const GLASS_LIT = '#FFE27A';    // warm lit window (kept)
+
+// Pixel-art building facade: flat fills, dark outlines, warm daytime palette.
+// Window-grid height scales with floorCount; lit windows scale with agentCount.
 export function drawBuilding(ctx: CanvasRenderingContext2D, o: BuildingFacadeOpts): void {
+  const rnd = (n: number) => seededRandom(o.seed + n);
   const floors = Math.max(2, Math.min(8, o.floorCount || 2));
+  const cols = 3 + Math.floor(rnd(2) * 3);            // 3–5 window columns
+  const roofStyle = Math.floor(rnd(3) * 3);           // 0 flat · 1 pitched · 2 stepped
+  const hasAwning = rnd(4) > 0.5;
+  const bodyBase = BODY_COLORS[Math.floor(rnd(0) * BODY_COLORS.length)];
+  const body = o.active ? adjustBrightness(bodyBase, 0.1) : bodyBase;
+  const roof = ROOF_COLORS[Math.floor(rnd(1) * ROOF_COLORS.length)];
+
   const bodyTop = o.y + o.h - (floors * 28 + 40);
   const bodyH = o.y + o.h - bodyTop;
 
-  // Shadow
-  ctx.fillStyle = 'rgba(0,0,0,0.25)';
+  // Ground shadow.
+  ctx.fillStyle = 'rgba(60, 50, 40, 0.28)';
   ctx.fillRect(o.x + 8, o.y + o.h - 10, o.w, 12);
 
-  // Body
-  ctx.fillStyle = o.active ? '#6b7fb5' : '#52607f';
+  // Body.
+  ctx.fillStyle = body;
   ctx.fillRect(o.x, bodyTop, o.w, bodyH);
-  ctx.strokeStyle = o.hovered ? '#ffd34d' : '#2b3450';
+  // Soft vertical shading for depth.
+  ctx.fillStyle = adjustBrightness(body, -0.08);
+  ctx.fillRect(o.x + o.w - 10, bodyTop, 10, bodyH);
+  ctx.strokeStyle = o.hovered ? '#ffd34d' : adjustBrightness(body, -0.3);
   ctx.lineWidth = o.hovered ? 3 : 2;
   ctx.strokeRect(o.x, bodyTop, o.w, bodyH);
 
-  // Roof
-  ctx.fillStyle = '#3a445f';
-  ctx.fillRect(o.x - 6, bodyTop - 14, o.w + 12, 14);
+  drawRoof(ctx, o.x, bodyTop, o.w, roof, roofStyle);
 
-  // Windows grid (cols x floors), lit up to agentCount
-  const cols = 4;
+  // Door geometry — reserved BEFORE the window grid so no window is drawn over
+  // the doorway (a window on woodwork looks wrong). The awning sits just above.
+  const doorW = 34, doorH = 40;
+  const doorX = o.x + o.w / 2 - doorW / 2;
+  const doorY = o.y + o.h - doorH;
+  const awningTop = hasAwning ? doorY - 10 : doorY;
+  const overlapsDoor = (wx: number, wy: number, wW: number, wH: number) =>
+    wx < doorX + doorW && wx + wW > doorX && wy < doorY + doorH && wy + wH > awningTop;
+
+  // Windows grid (cols × floors), lit up to agentCount; skip cells over the door.
   const total = cols * floors;
   const lit = Math.max(0, Math.min(total, o.agentCount));
   const wW = 26, wH = 16, padX = (o.w - cols * wW) / (cols + 1);
@@ -40,26 +67,71 @@ export function drawBuilding(ctx: CanvasRenderingContext2D, o: BuildingFacadeOpt
     for (let c = 0; c < cols; c++) {
       const wx = o.x + padX + c * (wW + padX);
       const wy = bodyTop + 14 + f * 28;
-      ctx.fillStyle = n < lit ? '#ffe27a' : '#27304a';
+      if (overlapsDoor(wx, wy, wW, wH)) { n++; continue; }
+      ctx.fillStyle = n < lit ? GLASS_LIT : GLASS_UNLIT;
       ctx.fillRect(wx, wy, wW, wH);
-      ctx.strokeStyle = '#1c2236';
+      // Glass glare.
+      ctx.fillStyle = 'rgba(255,255,255,0.25)';
+      ctx.fillRect(wx + 2, wy + 2, wW - 12, 3);
+      ctx.strokeStyle = adjustBrightness(body, -0.35);
       ctx.lineWidth = 1;
       ctx.strokeRect(wx, wy, wW, wH);
       n++;
     }
   }
 
-  // Door
-  const doorW = 34, doorH = 40;
-  ctx.fillStyle = '#2b2030';
-  ctx.fillRect(o.x + o.w / 2 - doorW / 2, o.y + o.h - doorH, doorW, doorH);
+  // Door (+ optional awning).
+  if (hasAwning) {
+    ctx.fillStyle = adjustBrightness(roof, 0.08);
+    ctx.fillRect(doorX - 8, doorY - 10, doorW + 16, 8);
+    ctx.fillStyle = adjustBrightness(roof, -0.12);
+    ctx.fillRect(doorX - 8, doorY - 3, doorW + 16, 3);
+  }
+  ctx.fillStyle = '#5A3B2A';
+  ctx.fillRect(doorX, doorY, doorW, doorH);
+  ctx.fillStyle = '#6E4A34';
+  ctx.fillRect(doorX + 3, doorY + 3, doorW - 6, doorH - 3);
+  ctx.fillStyle = '#E8C860';   // door knob
+  ctx.fillRect(doorX + doorW - 9, doorY + doorH / 2, 3, 3);
 
-  // Sign
-  ctx.fillStyle = '#0d1220';
+  // Name sign — warm wood plaque.
+  ctx.fillStyle = '#4A3B1A';
   ctx.fillRect(o.x, bodyTop - 38, o.w, 22);
-  ctx.fillStyle = '#e5e7eb';
+  ctx.fillStyle = '#FFF8E8';
   ctx.font = 'bold 14px monospace';
   ctx.textAlign = 'center';
   ctx.fillText(o.name.slice(0, 18), o.x + o.w / 2, bodyTop - 22);
   ctx.textAlign = 'left';
+}
+
+function drawRoof(ctx: CanvasRenderingContext2D, x: number, bodyTop: number, w: number, roof: string, style: number): void {
+  if (style === 1) {
+    // Pitched roof (triangle).
+    ctx.fillStyle = roof;
+    ctx.beginPath();
+    ctx.moveTo(x - 6, bodyTop);
+    ctx.lineTo(x + w / 2, bodyTop - 26);
+    ctx.lineTo(x + w + 6, bodyTop);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = adjustBrightness(roof, 0.12);
+    ctx.beginPath();
+    ctx.moveTo(x + w / 2, bodyTop - 26);
+    ctx.lineTo(x + w + 6, bodyTop);
+    ctx.lineTo(x + w - 6, bodyTop);
+    ctx.closePath();
+    ctx.fill();
+  } else if (style === 2) {
+    // Stepped / two-tier slab.
+    ctx.fillStyle = roof;
+    ctx.fillRect(x - 6, bodyTop - 14, w + 12, 14);
+    ctx.fillStyle = adjustBrightness(roof, 0.1);
+    ctx.fillRect(x + w / 4, bodyTop - 24, w / 2, 12);
+  } else {
+    // Flat slab.
+    ctx.fillStyle = roof;
+    ctx.fillRect(x - 6, bodyTop - 14, w + 12, 14);
+    ctx.fillStyle = adjustBrightness(roof, -0.12);
+    ctx.fillRect(x - 6, bodyTop - 4, w + 12, 4);
+  }
 }

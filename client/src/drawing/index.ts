@@ -10,3 +10,4 @@ export * from './outdoor';
 export * from './agent';
 export * from './coffee-shop';
 export * from './building';
+export * from './town-scene';

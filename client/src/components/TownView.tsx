@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useProjects } from '../hooks/useProjects';
-import { layoutTown, BUILDING_SIZE, PlacedBuilding } from '../layout/town-layout';
-import { drawBuilding } from '../drawing';
+import { layoutTown, streetGeometry, BUILDING_SIZE, PlacedBuilding } from '../layout/town-layout';
+import { drawBuilding, drawTownScene } from '../drawing';
 import { HabboRoom } from './HabboRoom';
 import type { FocusRequest, ActionRequest } from './AgentRosterPanel';
 import { hitTownAt, closeBadgeRect, removeAction } from '../layout/town-hit-test';
@@ -11,6 +11,13 @@ import { FolderBrowser } from './FolderBrowser';
 // layout margin (80px) and the nav/roster DOM lives at the top-right, so this
 // corner is always clear. One source of truth for draw and hit-test.
 const ADD_BTN = { x: 12, y: 12, w: 32, h: 32 };
+
+// Stable numeric seed from a project id → picks a deterministic facade variant.
+const seedFromId = (id: string): number => {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0;
+  return Math.abs(h);
+};
 
 // Controlled by the parent: `selected` is the project being viewed (null = town
 // overview), `onSelect` flips it. The "Town" back control lives in the parent's
@@ -39,17 +46,21 @@ export function TownView({ selected, onSelect, focusRequest, actionRequest }: {
     const ctx = canvas.getContext('2d', { alpha: false });
     if (!ctx) return;
     let raf = 0;
+    let frame = 0;
     const resize = () => { canvas.width = window.innerWidth; canvas.height = window.innerHeight; };
     resize();
     window.addEventListener('resize', resize);
 
     const render = () => {
+      frame++;
       placedRef.current = layoutTown(projectsRef.current);
-      ctx.fillStyle = '#1b2233';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      // street
-      ctx.fillStyle = '#10151f';
-      ctx.fillRect(0, canvas.height - 80, canvas.width, 80);
+      // Backdrop: grass map + sidewalks + roads + trees + lampposts.
+      drawTownScene(ctx, {
+        width: canvas.width,
+        height: canvas.height,
+        geometry: streetGeometry(placedRef.current, canvas.width),
+        frame,
+      });
       for (const b of placedRef.current) {
         drawBuilding(ctx, {
           x: b.x, y: b.y, w: BUILDING_SIZE.w, h: BUILDING_SIZE.h,
@@ -58,6 +69,7 @@ export function TownView({ selected, onSelect, focusRequest, actionRequest }: {
           agentCount: b.agentCount,
           active: Date.now() - b.lastActivity < 60000,
           hovered: hoverRef.current === b.projectId,
+          seed: seedFromId(b.projectId),
         });
       }
       // Close (✕) badge on pinned buildings.
@@ -81,10 +93,18 @@ export function TownView({ selected, onSelect, focusRequest, actionRequest }: {
       ctx.fillText('+', ADD_BTN.x + ADD_BTN.w / 2, ADD_BTN.y + 25);
       ctx.textAlign = 'left';
       if (placedRef.current.length === 0) {
-        ctx.fillStyle = '#8a93a6';
+        const msg = 'Aucun projet — lance Claude/Cursor dans un repo, ou clique « + » pour ajouter un dossier.';
         ctx.font = '18px monospace';
         ctx.textAlign = 'center';
-        ctx.fillText('Aucun projet — lance Claude/Cursor dans un repo, ou clique « + » pour ajouter un dossier.', canvas.width / 2, canvas.height / 2);
+        const tw = ctx.measureText(msg).width;
+        const cx = canvas.width / 2, cy = canvas.height / 2;
+        ctx.fillStyle = '#FFF8E6';
+        ctx.fillRect(cx - tw / 2 - 16, cy - 22, tw + 32, 36);
+        ctx.strokeStyle = '#4A3B1A';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(cx - tw / 2 - 16, cy - 22, tw + 32, 36);
+        ctx.fillStyle = '#3A2E12';
+        ctx.fillText(msg, cx, cy + 2);
         ctx.textAlign = 'left';
       }
       raf = requestAnimationFrame(render);

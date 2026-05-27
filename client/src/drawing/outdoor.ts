@@ -4,10 +4,10 @@ import { PALETTE } from './palette';
 import { seededRandom, getShadowOffset } from './utils';
 import { drawGrassTile, drawWaterTile, drawPathTile, drawWelcomeMat } from './tiles';
 
-type TreeType = 'oak' | 'pine' | 'bush' | 'fruit';
+export type TreeType = 'oak' | 'pine' | 'bush' | 'fruit';
 
 // Draw tree with type, sway animation, and shading
-const drawTree = (
+export const drawTree = (
   ctx: CanvasRenderingContext2D,
   x: number, y: number,
   type: TreeType,
