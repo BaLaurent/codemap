@@ -79,11 +79,14 @@ const navLinkStyle: React.CSSProperties = {
   boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)'
 };
 
-// HotelView - Shows the town of projects (each a building); drill into one for the interior
+// HotelView - Shows the town of projects (each a building); drill into one for the interior.
+// Owns the selected-building state so the "Town" back button lives in the shared
+// nav cluster alongside Tree/Hotel rather than floating on its own.
 function HotelView() {
+  const [selectedProject, setSelectedProject] = useState<string | null>(null);
   return (
     <>
-      <TownView />
+      <TownView selected={selectedProject} onSelect={setSelectedProject} />
       <div style={{
         position: 'absolute',
         top: 16,
@@ -94,6 +97,15 @@ function HotelView() {
       }}>
         <Link to="/" style={navLinkStyle}>Tree</Link>
         <Link to="/hotel" style={navLinkStyle}>Hotel</Link>
+        {selectedProject && (
+          <button
+            onClick={() => setSelectedProject(null)}
+            style={{ ...navLinkStyle, cursor: 'pointer' }}
+            title="Back to the town overview"
+          >
+            ← Town
+          </button>
+        )}
         <MuteButton />
       </div>
     </>

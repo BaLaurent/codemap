@@ -1,12 +1,17 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { useProjects } from '../hooks/useProjects';
 import { layoutTown, BUILDING_SIZE, PlacedBuilding } from '../layout/town-layout';
 import { drawBuilding } from '../drawing';
 import { HabboRoom } from './HabboRoom';
 
-export function TownView() {
+// Controlled by the parent: `selected` is the project being viewed (null = town
+// overview), `onSelect` flips it. The "Town" back control lives in the parent's
+// nav cluster, so this component only renders the town canvas or the interior.
+export function TownView({ selected, onSelect }: {
+  selected: string | null;
+  onSelect: (projectId: string | null) => void;
+}) {
   const { projectsRef } = useProjects();
-  const [selected, setSelected] = useState<string | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const placedRef = useRef<PlacedBuilding[]>([]);
   const hoverRef = useRef<string | null>(null);
@@ -60,7 +65,7 @@ export function TownView() {
     };
     const onClick = (e: MouseEvent) => {
       const b = hit(e.clientX, e.clientY);
-      if (b) setSelected(b.projectId);
+      if (b) onSelect(b.projectId);
     };
     canvas.addEventListener('mousemove', onMove);
     canvas.addEventListener('click', onClick);
@@ -71,24 +76,10 @@ export function TownView() {
       canvas.removeEventListener('mousemove', onMove);
       canvas.removeEventListener('click', onClick);
     };
-  }, [selected, projectsRef]);
+  }, [selected, projectsRef, onSelect]);
 
   if (selected) {
-    return (
-      <>
-        <HabboRoom projectId={selected} />
-        <button
-          onClick={() => setSelected(null)}
-          style={{
-            position: 'absolute', top: 16, left: 16, zIndex: 30,
-            padding: '10px 18px', cursor: 'pointer',
-            background: 'rgba(17,24,39,0.95)', color: '#e5e7eb',
-            border: '1px solid rgba(255,255,255,0.15)', borderRadius: 8,
-            fontWeight: 600,
-          }}
-        >← Town</button>
-      </>
-    );
+    return <HabboRoom projectId={selected} />;
   }
 
   return <canvas ref={canvasRef} style={{ display: 'block' }} />;
