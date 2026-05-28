@@ -8,6 +8,7 @@ import { TownView } from './components/TownView';
 import { AgentRosterPanel, type AgentFocusRequest, type FocusRequest, type ActionRequest } from './components/AgentRosterPanel';
 import { AgentStreamProvider } from './hooks/AgentStream';
 import { ChatProvider, useChat } from './components/ChatHost';
+import { TtyProvider, useTty } from './components/TtyHost';
 import { getMuted, setMuted } from './sounds';
 
 // Mute button component
@@ -92,7 +93,9 @@ function HotelView() {
   return (
     <AgentStreamProvider projectId={selectedProject ?? undefined}>
       <ChatProvider>
-        <HotelViewInner selectedProject={selectedProject} onSelectProject={setSelectedProject} />
+        <TtyProvider>
+          <HotelViewInner selectedProject={selectedProject} onSelectProject={setSelectedProject} />
+        </TtyProvider>
       </ChatProvider>
     </AgentStreamProvider>
   );
@@ -105,6 +108,7 @@ function HotelViewInner({ selectedProject, onSelectProject }: {
   const [focusRequest, setFocusRequest] = useState<FocusRequest | null>(null);
   const [actionRequest, setActionRequest] = useState<ActionRequest | null>(null);
   const { openChat } = useChat();
+  const { openTty } = useTty();
 
   // Clicking an agent in the roster: enter its building (if known) and stamp a
   // fresh focus request so HabboRoom flies the camera to it.
@@ -121,7 +125,7 @@ function HotelViewInner({ selectedProject, onSelectProject }: {
   return (
     <>
       <TownView selected={selectedProject} onSelect={onSelectProject} focusRequest={focusRequest} actionRequest={actionRequest} />
-      <AgentRosterPanel onSelectAgent={handleSelectAgent} onOpenChat={openChat} onRespond={handleRespond} />
+      <AgentRosterPanel onSelectAgent={handleSelectAgent} onOpenChat={openChat} onRespond={handleRespond} onOpenTty={openTty} />
       <div style={{
         position: 'absolute',
         top: 16,

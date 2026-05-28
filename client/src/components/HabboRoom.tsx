@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useAgentStream } from '../hooks/AgentStream';
 import { useChat } from './ChatHost';
+import { useTty } from './TtyHost';
 import { useFloorNavigation } from '../hooks/useFloorNavigation';
 import { FloorNavBar } from './FloorNavBar';
 import { InteractionModal, formatAnswers, type QuestionAnswer } from './InteractionModal';
@@ -42,6 +43,24 @@ import {
   drawAgentCharacter,
   drawCoffeeShop,
 } from '../drawing';
+
+function SpawnTtyButton({ projectId }: { projectId?: string }) {
+  const { spawnTty } = useTty();
+  return (
+    <button
+      style={{
+        background: '#0d3b2e', border: '3px solid #1a6b50', color: '#5af78e',
+        fontFamily: 'monospace', fontSize: 13, fontWeight: 700,
+        padding: '8px 14px', cursor: 'pointer',
+        boxShadow: '4px 4px 0 rgba(0,0,0,0.4)',
+      }}
+      onClick={() => spawnTty(projectId)}
+      title="Ouvrir un terminal dans ce projet"
+    >
+      💻 Spawn TTY
+    </button>
+  );
+}
 
 export function HabboRoom({ projectId, focusRequest, actionRequest }: { projectId?: string; focusRequest?: FocusRequest | null; actionRequest?: ActionRequest | null } = {}) {
   // All data comes via refs - NO STATE, NO RE-RENDERS
@@ -1581,7 +1600,7 @@ export function HabboRoom({ projectId, focusRequest, actionRequest }: { projectI
       )}
 
       {/* Spawn-an-agent control (bottom-left) */}
-      <div style={{ position: 'absolute', left: 16, bottom: 16, zIndex: 25, fontFamily: 'monospace' }}>
+      <div style={{ position: 'absolute', left: 16, bottom: 16, zIndex: 25, fontFamily: 'monospace', display: 'flex', gap: 8 }}>
         {spawnOpen ? (
           <SpawnPanel
             models={spawnModels}
@@ -1596,6 +1615,7 @@ export function HabboRoom({ projectId, focusRequest, actionRequest }: { projectI
             title="Invoquer un agent Claude depuis l'hôtel"
           >🪄 Spawn agent</button>
         )}
+        <SpawnTtyButton projectId={projectId} />
       </div>
 
     </div>
