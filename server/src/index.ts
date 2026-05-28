@@ -964,6 +964,134 @@ app.get('/api/graph', (req, res) => {
   res.json(w ? w.store.getGraphData() : { nodes: [], links: [] });
 });
 
+// File preview endpoint: returns the content of a file inside a project's root,
+// classified by kind so the client can pick the right renderer (Monaco, image,
+// markdown). Hard-refuses paths that escape the project root after symlink
+// resolution; refuses oversize files and binaries without ever loading them
+// into memory beyond a small sniff buffer.
+const PREVIEW_MAX_TEXT_BYTES = 2 * 1024 * 1024;
+const PREVIEW_MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+const PREVIEW_BINARY_SNIFF_BYTES = 8 * 1024;
+const PREVIEW_IMAGE_MIME: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.svg': 'image/svg+xml',
+  '.bmp': 'image/bmp',
+  '.ico': 'image/x-icon',
+};
+const PREVIEW_LANGUAGE_BY_EXT: Record<string, string> = {
+  '.ts': 'typescript', '.tsx': 'typescript', '.mts': 'typescript', '.cts': 'typescript',
+  '.js': 'javascript', '.jsx': 'javascript', '.mjs': 'javascript', '.cjs': 'javascript',
+  '.json': 'json', '.jsonc': 'json',
+  '.py': 'python', '.rb': 'ruby', '.go': 'go', '.rs': 'rust',
+  '.java': 'java', '.kt': 'kotlin', '.swift': 'swift', '.c': 'c', '.h': 'c',
+  '.cpp': 'cpp', '.cc': 'cpp', '.hpp': 'cpp', '.cs': 'csharp', '.php': 'php',
+  '.sh': 'shell', '.bash': 'shell', '.zsh': 'shell', '.fish': 'shell',
+  '.sql': 'sql', '.html': 'html', '.htm': 'html', '.css': 'css', '.scss': 'scss', '.less': 'less',
+  '.yml': 'yaml', '.yaml': 'yaml', '.toml': 'plaintext', '.ini': 'ini',
+  '.xml': 'xml', '.md': 'markdown', '.markdown': 'markdown',
+  '.dockerfile': 'dockerfile', '.lua': 'lua', '.r': 'r', '.gd': 'plaintext',
+};
+
+function previewLanguageOf(ext: string): string {
+  return PREVIEW_LANGUAGE_BY_EXT[ext.toLowerCase()] || 'plaintext';
+}
+
+app.get('/api/file/read', (req, res) => {
+  const projectId = (req.query.projectId as string) || registry.list()[0]?.projectId;
+  const filePath = req.query.filePath as string | undefined;
+  if (!projectId || typeof filePath !== 'string' || filePath.length === 0) {
+    res.status(400).json({ error: 'projectId and filePath required' });
+    return;
+  }
+  const w = registry.get(projectId);
+  if (!w) {
+    res.status(404).json({ error: 'project not found' });
+    return;
+  }
+
+  // Resolve both ends to real paths so symlinks can't smuggle the target out
+  // of the project. A relative filePath is resolved against the project root;
+  // an absolute one is still subject to the containment check below.
+  let projectRootReal: string;
+  let absoluteReal: string;
+  try {
+    projectRootReal = fs.realpathSync(w.projectRoot);
+    const requested = path.isAbsolute(filePath)
+      ? filePath
+      : path.resolve(projectRootReal, filePath);
+    absoluteReal = fs.realpathSync(requested);
+  } catch {
+    res.status(404).json({ error: 'file not found' });
+    return;
+  }
+
+  const containmentPrefix = projectRootReal.endsWith(path.sep) ? projectRootReal : projectRootReal + path.sep;
+  if (absoluteReal !== projectRootReal && !absoluteReal.startsWith(containmentPrefix)) {
+    res.status(403).json({ error: 'path escapes project root' });
+    return;
+  }
+
+  const stat = fs.statSync(absoluteReal);
+  if (stat.isDirectory()) {
+    res.status(400).json({ error: 'path is a directory' });
+    return;
+  }
+  if (!stat.isFile()) {
+    res.status(400).json({ error: 'not a regular file' });
+    return;
+  }
+
+  const ext = path.extname(absoluteReal).toLowerCase();
+  const name = path.basename(absoluteReal);
+  const size = stat.size;
+  const imageMime = PREVIEW_IMAGE_MIME[ext];
+
+  if (imageMime) {
+    if (size > PREVIEW_MAX_IMAGE_BYTES) {
+      res.json({ kind: 'unsupported', reason: 'too_large', name, ext, size });
+      return;
+    }
+    // SVG is text-ish but we still serve it as base64 so the client can render
+    // it with a single <img> path regardless of payload shape.
+    const buf = fs.readFileSync(absoluteReal);
+    res.json({ kind: 'image', mimeType: imageMime, content: buf.toString('base64'), name, ext, size });
+    return;
+  }
+
+  if (size > PREVIEW_MAX_TEXT_BYTES) {
+    res.json({ kind: 'unsupported', reason: 'too_large', name, ext, size });
+    return;
+  }
+
+  // Sniff for null bytes to detect binaries. We avoid loading the whole file
+  // for this check on large files (already capped at 2 MB above, but cheap).
+  const fd = fs.openSync(absoluteReal, 'r');
+  let isBinary = false;
+  try {
+    const sniff = Buffer.alloc(Math.min(PREVIEW_BINARY_SNIFF_BYTES, size));
+    if (sniff.length > 0) {
+      fs.readSync(fd, sniff, 0, sniff.length, 0);
+      for (let i = 0; i < sniff.length; i++) {
+        if (sniff[i] === 0) { isBinary = true; break; }
+      }
+    }
+  } finally {
+    fs.closeSync(fd);
+  }
+  if (isBinary) {
+    res.json({ kind: 'unsupported', reason: 'binary', name, ext, size });
+    return;
+  }
+
+  const content = fs.readFileSync(absoluteReal, 'utf-8');
+  const kind = (ext === '.md' || ext === '.markdown') ? 'markdown' : 'text';
+  res.json({ kind, content, language: previewLanguageOf(ext), name, ext, size });
+});
+
 // Get hot folders based on git history + live activity
 app.get('/api/hot-folders', async (req, res) => {
   const limit = parseInt(req.query.limit as string) || 50;

@@ -5,6 +5,7 @@ import { useTty } from './TtyHost';
 import { useFloorNavigation } from '../hooks/useFloorNavigation';
 import { FloorNavBar } from './FloorNavBar';
 import { InteractionModal, formatAnswers, type QuestionAnswer } from './InteractionModal';
+import { FilePreviewModal } from './FilePreviewModal';
 import { SpawnPanel, type SpawnRequest } from './SpawnPanel';
 import { GraphNode, FolderScore, type AgentQuestion, type AgentCapabilities, type ModelOption, type SubagentOption } from '../types';
 import { playReadSound, playWriteSound, playWaitingSound, initAudio } from '../sounds';
@@ -100,6 +101,11 @@ export function HabboRoom({ projectId, focusRequest, actionRequest }: { projectI
     | { mode: 'permission'; toolName?: string; toolInput?: string; title?: string; description?: string }
   );
   const [modalTarget, setModalTarget] = useState<ModalTarget | null>(null);
+
+  // Click-to-preview: relative path of the file currently shown in the
+  // FilePreviewModal. Local state (not a ref) so the modal mounts/unmounts on
+  // open/close. Cleared on floor/project change because HabboRoom unmounts then.
+  const [filePreviewPath, setFilePreviewPath] = useState<string | null>(null);
 
   // chatTick advances (via the render loop) when a permission-request arrives for
   // the focused chat agent, re-running the auto-open effect below.
@@ -1468,7 +1474,34 @@ export function HabboRoom({ projectId, focusRequest, actionRequest }: { projectI
         // question — openInteractionFor decides from global state).
         const char = agentCharactersRef.current.get(clickedAgentId);
         if (char?.waitingForInput) openInteractionFor(clickedAgentId);
-      } else if (trackedAgentIdRef.current) {
+        return;
+      }
+
+      // No agent under the cursor → hit-test the desks (files). Agent always
+      // wins, per the design: clicking an agent at its desk opens the chat,
+      // not the file preview. The radius is roughly one tile; clicking on
+      // empty floor closes nothing and does nothing.
+      const DESK_HIT_RADIUS = 22;
+      let bestFile: { path: string; dist: number } | null = null;
+      for (const [id, pos] of filePositionsRef.current) {
+        // Folder entries (room-level positions) are stored alongside files in
+        // the same map; the server will 400 on directories, but we skip the
+        // root marker '.' here so a click on empty room space does nothing.
+        if (id === '.' || id.endsWith('/')) continue;
+        const dx = worldX - pos.x;
+        const dy = worldY - pos.y;
+        const d2 = dx * dx + dy * dy;
+        if (d2 <= DESK_HIT_RADIUS * DESK_HIT_RADIUS) {
+          const dist = Math.sqrt(d2);
+          if (!bestFile || dist < bestFile.dist) bestFile = { path: id, dist };
+        }
+      }
+      if (bestFile) {
+        setFilePreviewPath(bestFile.path);
+        return;
+      }
+
+      if (trackedAgentIdRef.current) {
         // Clicked elsewhere while tracking - exit tracking mode
         trackedAgentIdRef.current = null;
       }
@@ -1596,6 +1629,14 @@ export function HabboRoom({ projectId, focusRequest, actionRequest }: { projectI
             }
             setModalTarget(null);
           }}
+        />
+      )}
+
+      {filePreviewPath && (
+        <FilePreviewModal
+          projectId={projectId}
+          filePath={filePreviewPath}
+          onClose={() => setFilePreviewPath(null)}
         />
       )}
 
