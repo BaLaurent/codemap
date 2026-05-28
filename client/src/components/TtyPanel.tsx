@@ -35,9 +35,6 @@ interface TtyPanelProps {
 
 export function TtyPanel({ ttyId, title, cwd, rightOffset, onClose }: TtyPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const termRef = useRef<Terminal | null>(null);
-  const fitRef = useRef<FitAddon | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
 
   const cwdShort = cwd.split('/').slice(-2).join('/');
 
@@ -60,11 +57,7 @@ export function TtyPanel({ ttyId, title, cwd, rightOffset, onClose }: TtyPanelPr
     term.loadAddon(webLinksAddon);
     term.open(containerRef.current);
     fitAddon.fit();
-    termRef.current = term;
-    fitRef.current = fitAddon;
-
     const ws = new WebSocket(`${WS_URL}/ws/tty/${ttyId}`);
-    wsRef.current = ws;
 
     ws.onopen = () => {
       const { cols, rows } = term;
