@@ -74,6 +74,16 @@ describe('buildRoster', () => {
     expect(groups[0].agents[0].baseName).toBe('Claude 1');
   });
 
+  it('carries the permission mode through to the roster entry (for the mode badge)', () => {
+    const groups = buildRoster(
+      [agent({ agentId: 'a', projectId: 'p1', spawned: true, permissionMode: 'bypassPermissions' })],
+      projects,
+      NOW,
+      identityName
+    );
+    expect(groups[0].agents[0].permissionMode).toBe('bypassPermissions');
+  });
+
   it('sorts agents within a group by most recent activity', () => {
     const groups = buildRoster(
       [

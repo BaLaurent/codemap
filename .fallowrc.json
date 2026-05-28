@@ -1,0 +1,27 @@
+{
+  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
+
+  // Symbols exported but referenced only inside their own declaring file: the
+  // drawing palette/floor helpers (drawing/room.ts, drawing/furniture.ts) and the
+  // project-identity guards (server/project-identity.ts). The export aids module
+  // cohesion and testability — the code runs, only the cross-file use is absent.
+  "ignoreExportsUsedInFile": true,
+
+  // Methods reached through a property whose receiver type fallow's syntactic pass
+  // cannot infer — e.g. `workspace.store.clear()` / `session.input.close()` — plus
+  // WebSocketManager.close(), the lifecycle hook kept at the WebSocket boundary.
+  // All are genuinely used or intentional; fallow just can't see the call site.
+  "usedClassMembers": ["clear", "close", "getRecentlyActiveFiles", "getProjectRoot"],
+
+  // Type names intentionally duplicated across boundaries that cannot import one
+  // another: AgentStatus (client <-> server, no shared package) and ScreenFlash
+  // (the utils module <-> the drawing type barrel). Only these exact names are
+  // excluded from duplicate-export grouping, so genuine accidental duplicates of
+  // other symbols are still reported.
+  "ignoreExports": [
+    { "file": "server/src/types.ts", "exports": ["AgentStatus"] },
+    { "file": "client/src/types.ts", "exports": ["AgentStatus"] },
+    { "file": "client/src/drawing/types.ts", "exports": ["AgentStatus", "ScreenFlash"] },
+    { "file": "client/src/utils/screen-flash.ts", "exports": ["ScreenFlash"] }
+  ]
+}

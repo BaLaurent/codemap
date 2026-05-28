@@ -5,6 +5,7 @@
 // names from the agent-names store (shared with the canvas bubble).
 import { useEffect, useState, type CSSProperties } from 'react';
 import { useAgentRoster, RosterState } from '../hooks/useAgentRoster';
+import { permissionModeLabel } from './permission-modes';
 import { setAgentName, clearAgentName, hasCustomName } from '../utils/agent-names';
 
 export interface AgentFocusRequest {
@@ -229,7 +230,7 @@ export function AgentRosterPanel({ onSelectAgent, onOpenChat, onRespond }: {
                                 whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                               }}>{a.displayName}</div>
                               <div style={{ fontSize: 11, color: '#8a93a6', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                {a.currentCommand ? `${a.currentCommand} · ` : ''}{formatAge(now - a.lastActivity)}
+                                {a.spawned && a.permissionMode ? `🛡 ${permissionModeLabel(a.permissionMode)} · ` : ''}{a.currentCommand ? `${a.currentCommand} · ` : ''}{formatAge(now - a.lastActivity)}
                               </div>
                             </>
                           )}

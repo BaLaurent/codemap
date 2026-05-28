@@ -9,15 +9,6 @@ export interface FileActivityEvent {
   timestamp: number;
 }
 
-export interface ThinkingEvent {
-  type: 'thinking-start' | 'thinking-end';
-  agentId: string;
-  projectId?: string;     // Building identity (git root or cwd)
-  projectRoot?: string;   // Absolute root path for relativization
-  projectName?: string;   // basename of projectRoot, shown as building sign
-  timestamp: number;
-}
-
 /** Agent status from stop events */
 export type AgentStatus = 'completed' | 'aborted' | 'error';
 
@@ -102,6 +93,7 @@ export interface AgentThinkingState {
   waitingForInput?: boolean;  // True when agent is waiting for user input
   question?: AgentQuestion;  // Real question the agent is asking (from AskUserQuestion)
   spawned?: boolean;  // Launched from the hotel (chattable via the panel)
+  running?: boolean;  // Spawned agents only: SDK session still live (false → chat session ended)
   agentType?: string;  // Agent type (Plan, Explore, Bash, etc.)
   model?: string;  // Model name (e.g., "claude-3.5-sonnet")
   permissionMode?: string;  // Spawned agents: current permission mode
@@ -145,20 +137,6 @@ export interface GraphLink {
 export interface GraphData {
   nodes: GraphNode[];
   links: GraphLink[];
-}
-
-export interface ForceGraphNode extends GraphNode {
-  x?: number;
-  y?: number;
-  vx?: number;
-  vy?: number;
-  fx?: number | null;
-  fy?: number | null;
-}
-
-export interface ForceGraphLink {
-  source: string | ForceGraphNode;
-  target: string | ForceGraphNode;
 }
 
 // Hot folders from git activity API

@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { createServer } from 'http';
@@ -12,9 +13,10 @@ import { getHotFolders, clearCache as clearGitCache } from './git-activity.js';
 import { randomUUID } from 'node:crypto';
 import { FileActivityEvent, ThinkingEvent, AgentThinkingState, InteractionOutcome, ChatMessage } from './types.js';
 import { appendChatMessage, getTranscript, clearTranscripts } from './transcript-store.js';
+import { attachmentDir, reserveAttachmentPath } from './attachments.js';
 import { fileFromActivityEvent } from './agent-file.js';
 import { registerRequest, awaitDecision, resolveRequest, resolveAgentRequests } from './pending-requests.js';
-import { spawnAgent, sendMessage as runnerSendMessage, stopAgent, getAgentCapabilities, getProjectCapabilities, setMode as runnerSetMode, setModel as runnerSetModel, type PermissionRequest } from './agent-runner/index.js';
+import { spawnAgent, sendMessage as runnerSendMessage, stopAgent, getAgentCapabilities, getProjectCapabilities, setMode as runnerSetMode, setModel as runnerSetModel, isRunning, type PermissionRequest } from './agent-runner/index.js';
 import type { PermissionMode } from '@anthropic-ai/claude-agent-sdk';
 
 const PORT = 5174; // Fixed port - never change
@@ -258,8 +260,14 @@ setInterval(() => {
   }
 }, 2000); // Sync every 2 seconds
 
+// Spawned agents carry a derived `running` flag (is the SDK session still live?)
+// computed here at the serialization boundary, so it is never written to the
+// persisted state file. The client uses it as the authoritative "session ended"
+// signal instead of guessing from the transcript.
 function getAgentStatesArray(): AgentThinkingState[] {
-  return Array.from(agentStates.values());
+  return Array.from(agentStates.values()).map(s =>
+    s.spawned ? { ...s, running: isRunning(s.agentId) } : s
+  );
 }
 
 // Recompute per-building agent counts from current agent states.
@@ -607,8 +615,15 @@ app.post('/api/agent/spawn', (req, res) => {
       onError: (id, message) => {
         console.error(`[${new Date().toISOString()}] agent ${id} SDK session crashed: ${message}`);
         broadcastChat(id, 'system', "⚠️ La session a planté côté SDK et s'est arrêtée. Spawn un nouvel agent pour continuer.");
+        wsManager.broadcast('thinking', getAgentStatesArray());
       },
-      onEnd: (id) => broadcastChat(id, 'system', '— session terminée —'),
+      // onEnd/onError both fire after the runner deleted the session, so isRunning
+      // now reports false: re-broadcast state so the chat input disables at once
+      // (instead of lagging until the next thinking broadcast).
+      onEnd: (id) => {
+        broadcastChat(id, 'system', '— session terminée —');
+        wsManager.broadcast('thinking', getAgentStatesArray());
+      },
     },
   );
   console.log(`[${new Date().toISOString()}] SPAWNED agent ${state.displayName} (${agentId}) in ${workdir}`);
@@ -629,6 +644,54 @@ app.get('/api/agent/:agentId/capabilities', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
   }
+});
+
+// User-uploaded attachments from the hotel chat. Files land in
+// /tmp/codemap-attachments/<agentId>/ and the client mentions the absolute
+// path in the next message so the agent reads them via its normal file tools.
+// Cap: 10 files per request, 25 MB each — big enough for screenshots/CSVs,
+// small enough that we can keep them in memory before writing.
+const attachUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { files: 10, fileSize: 25 * 1024 * 1024 },
+});
+
+// Translate multer's stream errors (wrong field name, file too big, too many
+// files) into the same JSON 400 shape the rest of the route returns, instead
+// of Express's default HTML stack trace page.
+const attachMiddleware: express.RequestHandler = (req, res, next) => {
+  attachUpload.array('files', 10)(req, res, (err: unknown) => {
+    if (err) {
+      res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+      return;
+    }
+    next();
+  });
+};
+
+app.post('/api/agent/:agentId/attach', attachMiddleware, (req, res) => {
+  const { agentId } = req.params;
+  const files = (req.files as Express.Multer.File[] | undefined) ?? [];
+  if (files.length === 0) {
+    res.status(400).json({ error: 'no files in upload (expected multipart field "files")' });
+    return;
+  }
+  const dir = attachmentDir(agentId);
+  const paths: string[] = [];
+  try {
+    for (const f of files) {
+      // multer gives us latin1-encoded filenames; re-decode as UTF-8 so
+      // accented names ("résumé.pdf") survive the round trip.
+      const original = Buffer.from(f.originalname, 'latin1').toString('utf8');
+      const dest = reserveAttachmentPath(dir, original);
+      fs.writeFileSync(dest, f.buffer);
+      paths.push(dest);
+    }
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    return;
+  }
+  res.json({ paths });
 });
 
 // Push a new user turn into a live spawned session.

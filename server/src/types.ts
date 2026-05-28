@@ -87,6 +87,7 @@ export interface AgentThinkingState {
   waitingForInput?: boolean;  // True when agent is waiting for user input
   question?: AgentQuestion;  // Real question the agent is asking (from AskUserQuestion)
   spawned?: boolean;  // True for agents launched from the hotel (chattable via the panel)
+  running?: boolean;  // Spawned agents only, derived (never persisted): SDK session still live
   pendingToolStart?: number;  // Timestamp when tool started (for detecting stuck permission prompts)
   agentType?: string;  // Agent type (e.g., "Plan", "Explore", "Bash") - shown in display name
   model?: string;  // Model name (e.g., "claude-3.5-sonnet") - shown below agent name

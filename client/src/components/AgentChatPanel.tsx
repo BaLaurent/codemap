@@ -1,7 +1,7 @@
 // Chat panel for a hotel-spawned agent: shows the transcript (user/assistant/
 // system lines streamed over WS) and lets the user send new turns. Same pixel-art
 // palette as the interaction modal.
-import { useState, useRef, useEffect, type CSSProperties } from 'react';
+import { useState, useRef, useEffect, type CSSProperties, type ClipboardEvent } from 'react';
 import type { ChatMessage, SlashCommand, ModelOption } from '../types';
 import { CompletionInput } from './chat-completion';
 import { PERMISSION_MODE_OPTIONS } from './permission-modes';
@@ -49,6 +49,16 @@ const sendBtn: CSSProperties = {
   boxShadow: '2px 2px 0 rgba(0,0,0,0.3)', cursor: 'pointer',
 };
 
+const attachBtn: CSSProperties = {
+  fontFamily: 'monospace', fontWeight: 700, fontSize: 14, padding: '6px 8px',
+  color: C.ink, background: C.cream, border: `3px solid ${C.border}`,
+  boxShadow: '2px 2px 0 rgba(0,0,0,0.3)', cursor: 'pointer',
+};
+
+const attachStatus: CSSProperties = {
+  padding: '0 10px 6px', fontSize: 11, fontStyle: 'italic', color: C.ink, opacity: 0.7,
+};
+
 function bubbleStyle(role: ChatMessage['role']): CSSProperties {
   if (role === 'user') {
     return { alignSelf: 'flex-end', background: '#FFF0B8', border: `2px solid ${C.border}`, padding: '5px 8px', marginBottom: 6, maxWidth: '85%', whiteSpace: 'pre-wrap', wordBreak: 'break-word' };
@@ -69,7 +79,7 @@ function lineText(m: ChatMessage): string {
   return m.content;
 }
 
-export function AgentChatPanel({ agentName, messages, dead, commands, files, models, model, mode, onModelChange, onModeChange, onSend, onStop, onClose }: {
+export function AgentChatPanel({ agentName, messages, dead, commands, files, models, model, mode, onModelChange, onModeChange, onSend, onStop, onClose, onAttach }: {
   agentName: string;
   messages: ChatMessage[];
   dead?: boolean;  // session ended/crashed → input is disabled
@@ -83,9 +93,14 @@ export function AgentChatPanel({ agentName, messages, dead, commands, files, mod
   onSend: (content: string) => void;
   onStop: () => void;
   onClose: () => void;
+  // Upload files to the agent's attachment folder. Returns the absolute paths
+  // the server wrote them to (the panel mentions those in the draft).
+  onAttach: (files: File[]) => Promise<string[]>;
 }) {
   const [draft, setDraft] = useState('');
+  const [attachStatusText, setAttachStatusText] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Local mirrors so a pick reflects immediately, then resyncs if the
   // server-confirmed value (prop) changes.
@@ -112,8 +127,47 @@ export function AgentChatPanel({ agentName, messages, dead, commands, files, mod
     setDraft('');
   };
 
+  // Upload one or more files, then append "@<absPath>" mentions to the draft so
+  // the user can keep typing context around them. Trailing space lets you start
+  // the sentence immediately ("@/tmp/.../foo.txt explique-moi…").
+  const uploadFiles = async (picked: File[]) => {
+    if (dead || picked.length === 0) return;
+    setAttachStatusText(`⏳ envoi de ${picked.length} fichier${picked.length > 1 ? 's' : ''}…`);
+    try {
+      const paths = await onAttach(picked);
+      if (paths.length === 0) { setAttachStatusText('⚠ aucun fichier renvoyé par le serveur'); return; }
+      const mentions = paths.map(p => `@${p}`).join(' ') + ' ';
+      setDraft(d => (d ? `${d.replace(/\s*$/, '')} ${mentions}` : mentions));
+      setAttachStatusText(`📎 ${paths.length} fichier${paths.length > 1 ? 's' : ''} joint${paths.length > 1 ? 's' : ''}`);
+    } catch (err) {
+      setAttachStatusText(`⚠ upload échoué: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      // Auto-fade the status (success or error) so the panel doesn't grow a
+      // permanent line. Errors still visible long enough to read.
+      window.setTimeout(() => setAttachStatusText(null), 4000);
+    }
+  };
+
+  const onPickFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const list = e.target.files;
+    if (!list) return;
+    void uploadFiles(Array.from(list));
+    // Reset so the same file can be re-picked later if needed.
+    e.target.value = '';
+  };
+
+  // Paste anywhere on the panel: if the clipboard carries files (screenshot,
+  // copied file), intercept and upload them; otherwise let the normal paste
+  // (text into the input) happen.
+  const onPaste = (e: ClipboardEvent<HTMLDivElement>) => {
+    const list = e.clipboardData?.files;
+    if (!list || list.length === 0) return;
+    e.preventDefault();
+    void uploadFiles(Array.from(list));
+  };
+
   return (
-    <div style={panel}>
+    <div style={panel} onPaste={onPaste}>
       <div style={titleBar}>
         <span>💬 {agentName}</span>
         <span>
@@ -154,7 +208,22 @@ export function AgentChatPanel({ agentName, messages, dead, commands, files, mod
         </div>
       </div>
 
+      {attachStatusText && <div style={attachStatus}>{attachStatusText}</div>}
+
       <div style={inputRow}>
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          style={{ display: 'none' }}
+          onChange={onPickFiles}
+        />
+        <button
+          style={{ ...attachBtn, opacity: dead ? 0.5 : 1, cursor: dead ? 'not-allowed' : 'pointer' }}
+          disabled={dead}
+          onClick={() => fileInputRef.current?.click()}
+          title="Joindre des fichiers (ou Ctrl+V un screenshot)"
+        >📎</button>
         <CompletionInput
           value={draft}
           onChange={setDraft}

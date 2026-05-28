@@ -130,6 +130,17 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       body: JSON.stringify({ model }),
     }).catch(console.error);
   };
+  // Upload one or more files to the agent's attachment folder. Returns the
+  // absolute paths so the panel can mention them in the draft.
+  const attachFiles = async (agentId: string, files: File[]): Promise<string[]> => {
+    if (files.length === 0) return [];
+    const form = new FormData();
+    for (const f of files) form.append('files', f, f.name);
+    const r = await fetch(`${API_URL}/agent/${agentId}/attach`, { method: 'POST', body: form });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const body = (await r.json()) as { paths?: string[] };
+    return body.paths ?? [];
+  };
 
   // Recomputed on each tick so the panel reflects newly-arrived lines.
   const history = useMemo<ChatMessage[]>(
@@ -143,10 +154,14 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     <ChatContext.Provider value={control}>
       {children}
       {chatAgentId && (() => {
-        // The runner only emits a terminal 'system' line on crash/end, so a system
-        // message in last position means the session is dead.
-        const dead = history.length > 0 && history[history.length - 1].role === 'system';
         const agent = thinkingAgentsRef.current.find(a => a.agentId === chatAgentId);
+        // Authoritative when the agent is still tracked: the server reports whether
+        // its SDK session is live. Falls back to the transcript signal (a terminal
+        // 'system' line) for post-kill replay, where the agent has been dropped from
+        // state and only its transcript remains.
+        const dead = agent
+          ? agent.running === false
+          : history.length > 0 && history[history.length - 1].role === 'system';
         return (
           <AgentChatPanel
             agentName={getAgentName(chatAgentId, agent?.displayName || 'Agent')}
@@ -162,6 +177,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             onSend={content => sendChat(chatAgentId, content)}
             onStop={() => { stopChat(chatAgentId); closeChat(); }}
             onClose={closeChat}
+            onAttach={files => attachFiles(chatAgentId, files)}
           />
         );
       })()}

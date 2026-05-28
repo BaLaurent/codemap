@@ -26,6 +26,7 @@ export interface RosterEntry {
   currentCommand?: string;
   toolInput?: string;
   spawned?: boolean;  // launched from the hotel → chattable
+  permissionMode?: string;  // spawned agents: current permission mode (shown as a badge)
   lastActivity: number;
 }
 
@@ -80,6 +81,7 @@ export function buildRoster(
       currentCommand: agent.currentCommand,
       toolInput: agent.toolInput,
       spawned: agent.spawned,
+      permissionMode: agent.permissionMode,
       lastActivity: agent.lastActivity,
     });
   }
