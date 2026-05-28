@@ -13,7 +13,7 @@ export class WebSocketManager {
   private pingInterval: ReturnType<typeof setInterval>;
 
   constructor(server: Server) {
-    this.wss = new WebSocketServer({ server, path: '/ws' });
+    this.wss = new WebSocketServer({ noServer: true });
 
     this.wss.on('connection', (ws: ExtendedWebSocket) => {
       ws.isAlive = true;
@@ -71,6 +71,12 @@ export class WebSocketManager {
 
   getClientCount(): number {
     return this.clients.size;
+  }
+
+  handleUpgrade(req: import('http').IncomingMessage, socket: import('stream').Duplex, head: Buffer): void {
+    this.wss.handleUpgrade(req, socket, head, (ws) => {
+      this.wss.emit('connection', ws, req);
+    });
   }
 
   close(): void {

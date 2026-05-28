@@ -48,14 +48,21 @@ app.use(express.json());
 const server = createServer(app);
 const wsManager = new WebSocketManager(server);
 
-// TTY WebSocket — un WS dédié par terminal, routé via upgrade event
+// TTY WebSocket — noServer mode, same pattern as wsManager
 const ttyWss = new WebSocketServer({ noServer: true });
 
+// Single upgrade handler routes /ws → wsManager, /ws/tty/* → ttyWss.
+// Both WS servers use noServer:true so neither calls abortHandshake on the other's paths.
 server.on('upgrade', (req, socket, head) => {
   const url = req.url ?? '';
-  if (!url.startsWith('/ws/tty/')) return;
+  const path = url.split('?')[0];
+  if (path === '/ws') {
+    wsManager.handleUpgrade(req, socket, head);
+    return;
+  }
+  if (!path.startsWith('/ws/tty/')) return;
   ttyWss.handleUpgrade(req, socket, head, (ws) => {
-    const ttyId = url.slice('/ws/tty/'.length).split('?')[0];
+    const ttyId = path.slice('/ws/tty/'.length);
     const session = ttyManager.get(ttyId);
     if (!session) {
       ws.close(4004, 'TTY not found');

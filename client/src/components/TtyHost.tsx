@@ -71,19 +71,21 @@ export function TtyProvider({ children }: { children: ReactNode }) {
   return (
     <TtyContext.Provider value={control}>
       {children}
-      {/* Toutes les sessions sont montées ; les non-actives sont cachées pour
-          préserver l'état xterm.js et la connexion WS lors du switch. */}
-      {ttySessions.map(session => (
-        <div key={session.ttyId} style={session.ttyId === openTtyId ? undefined : { display: 'none' }}>
+      {/* Seul le panneau actif est monté — xterm.js requiert un conteneur
+          visible pour initialiser son renderer. Le buffer serveur assure
+          le replay de l'historique à chaque (re)connexion. */}
+      {ttySessions.map(session =>
+        session.ttyId === openTtyId ? (
           <TtyPanel
+            key={session.ttyId}
             ttyId={session.ttyId}
             title={session.title}
             cwd={session.cwd}
             rightOffset={rightOffset}
             onClose={() => closeTty(session.ttyId)}
           />
-        </div>
-      ))}
+        ) : null
+      )}
     </TtyContext.Provider>
   );
 }
