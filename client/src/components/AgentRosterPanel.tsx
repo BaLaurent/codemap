@@ -7,6 +7,7 @@ import { useEffect, useState, type CSSProperties } from 'react';
 import { useAgentRoster, RosterState } from '../hooks/useAgentRoster';
 import { permissionModeLabel } from './permission-modes';
 import { setAgentName, clearAgentName, hasCustomName } from '../utils/agent-names';
+import { useTty } from './TtyHost';
 
 export interface AgentFocusRequest {
   projectId?: string;
@@ -112,12 +113,14 @@ const actionBtn: CSSProperties = {
   cursor: 'pointer', flexShrink: 0,
 };
 
-export function AgentRosterPanel({ onSelectAgent, onOpenChat, onRespond }: {
+export function AgentRosterPanel({ onSelectAgent, onOpenChat, onRespond, onOpenTty }: {
   onSelectAgent: (req: AgentFocusRequest) => void;
   onOpenChat?: (agentId: string) => void;
   onRespond?: (agentId: string) => void;
+  onOpenTty?: (ttyId: string) => void;
 }) {
   const { groups, clearAgents, stopAgent } = useAgentRoster();
+  const { ttySessions, spawnTty } = useTty();
   const [collapsed, setCollapsed] = useState(() => loadBool(COLLAPSED_KEY));
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => loadSet(GROUPS_KEY));
   const [menu, setMenu] = useState<{ agentId: string; baseName: string; spawned: boolean; x: number; y: number } | null>(null);
@@ -249,6 +252,42 @@ export function AgentRosterPanel({ onSelectAgent, onOpenChat, onRespond }: {
                 </div>
               );
             })}
+
+            {/* Section Terminaux */}
+            <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', marginTop: 4, paddingTop: 4 }}>
+              <div style={{ ...groupHeader, justifyContent: 'space-between' }}>
+                <span>💻 Terminaux ({ttySessions.length})</span>
+                <button
+                  style={{ ...clearBtn, fontSize: 10 }}
+                  title="Nouveau terminal"
+                  onClick={e => { e.stopPropagation(); spawnTty(); }}
+                >+</button>
+              </div>
+              {ttySessions.length === 0 && (
+                <div style={{ padding: '6px 14px', color: '#8a93a6', fontSize: 12 }}>Aucun terminal.</div>
+              )}
+              {ttySessions.map(tty => (
+                <div key={tty.ttyId} style={row}>
+                  <span style={{
+                    width: 9, height: 9, borderRadius: '50%', flexShrink: 0,
+                    backgroundColor: '#34d399', boxShadow: '0 0 6px #34d39980',
+                  }} />
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {tty.title}
+                    </div>
+                    <div style={{ fontSize: 11, color: '#8a93a6', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {tty.cwd.split('/').slice(-2).join('/')}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 4 }} onClick={e => e.stopPropagation()}>
+                    {onOpenTty && (
+                      <button style={actionBtn} title="Ouvrir le terminal" onClick={() => onOpenTty(tty.ttyId)}>💻</button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </div>
