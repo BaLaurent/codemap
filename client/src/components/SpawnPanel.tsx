@@ -25,7 +25,9 @@ const goldBtn: CSSProperties = {
 };
 
 export interface SpawnRequest {
-  initialPrompt: string;
+  /** First user turn pushed to the session. Optional: when omitted the agent
+   *  spawns idle and waits for its first chat message before doing anything. */
+  initialPrompt?: string;
   permissionMode: string;
   model?: string;
   agent?: string;
@@ -51,9 +53,10 @@ export function SpawnPanel({ models, agents, onSpawn, onClose }: {
 
   const launch = () => {
     const initialPrompt = draft.trim();
-    if (!initialPrompt) return;
     onSpawn({
-      initialPrompt, permissionMode,
+      // Empty prompt → spawn idle, the chat will drive the first turn.
+      initialPrompt: initialPrompt || undefined,
+      permissionMode,
       model: model && model !== 'default' ? model : undefined,
       agent: agent || undefined,
       effort: effort && effort !== 'default' ? effort : undefined,
@@ -70,7 +73,7 @@ export function SpawnPanel({ models, agents, onSpawn, onClose }: {
       <input
         autoFocus
         style={field}
-        placeholder="Tâche pour le nouvel agent…"
+        placeholder="Tâche (optionnel) — laisse vide pour spawn en attente"
         value={draft}
         onChange={e => setDraft(e.target.value)}
         onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); launch(); } }}

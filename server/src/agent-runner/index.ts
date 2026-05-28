@@ -143,7 +143,10 @@ export function dispatchSdkMessage(message: unknown, agentId: string, cb: Runner
 
 export function spawnAgent(
   opts: {
-    agentId: string; cwd: string; projectId?: string; initialPrompt: string;
+    agentId: string; cwd: string; projectId?: string;
+    /** First user turn. Omit to spawn an idle session that parks on its input
+     *  stream until `sendMessage()` delivers the user's first chat turn. */
+    initialPrompt?: string;
     permissionMode?: PermissionMode; model?: string; agent?: string;
     /** Per-spawn effort level (SDK `effort`), guides thinking depth. Omit to
      *  let the SDK pick its default (adaptive on Opus 4.6+). The SDK has no
@@ -158,7 +161,9 @@ export function spawnAgent(
 ): void {
   const { agentId, cwd, projectId, initialPrompt, permissionMode = 'default', model, agent, effort, thinking } = opts;
   const input = new SessionInput();
-  input.push(initialPrompt, agentId);
+  // No prompt → don't push anything; the SDK stream parks on its first yield
+  // until sendMessage() unblocks it with the user's first chat turn.
+  if (initialPrompt) input.push(initialPrompt, agentId);
 
   // Route every permission check the SDK raises to the hotel modal and translate
   // the user's decision back into the SDK's allow/deny shape.

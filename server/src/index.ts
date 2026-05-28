@@ -590,10 +590,13 @@ async function requestPermission(agentId: string, req: PermissionRequest): Promi
 
 app.post('/api/agent/spawn', (req, res) => {
   const { projectId, cwd, initialPrompt, permissionMode, model, agent, effort } = req.body ?? {};
-  if (!initialPrompt || typeof initialPrompt !== 'string') {
-    res.status(400).json({ error: 'initialPrompt required' });
+  // initialPrompt is optional: empty/missing → spawn an idle session that waits
+  // for its first chat turn. Reject only non-string values to catch obvious bugs.
+  if (initialPrompt !== undefined && typeof initialPrompt !== 'string') {
+    res.status(400).json({ error: 'initialPrompt must be a string' });
     return;
   }
+  const firstTurn = typeof initialPrompt === 'string' && initialPrompt.length > 0 ? initialPrompt : undefined;
   const mode: PermissionMode = PERMISSION_MODES.includes(permissionMode) ? permissionMode : 'default';
   const agentId = randomUUID();
   // Resolve the working directory: an explicit cwd wins; otherwise spawn inside
@@ -619,12 +622,12 @@ app.post('/api/agent/spawn', (req, res) => {
   refreshAgentCounts();
   wsManager.broadcast('thinking', getAgentStatesArray());
 
-  broadcastChat(agentId, 'user', initialPrompt);
+  if (firstTurn) broadcastChat(agentId, 'user', firstTurn);
   const effortOpts = resolveEffortOptions(effort);
   spawnAgent(
     {
       agentId, cwd: workdir, projectId: typeof projectId === 'string' ? projectId : undefined,
-      initialPrompt, permissionMode: mode,
+      initialPrompt: firstTurn, permissionMode: mode,
       model: typeof model === 'string' && model ? model : undefined,
       agent: typeof agent === 'string' && agent ? agent : undefined,
       ...effortOpts,
