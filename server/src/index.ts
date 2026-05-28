@@ -5,6 +5,8 @@ import path from 'path';
 import fs from 'fs';
 import { createServer } from 'http';
 import { WebSocketManager } from './websocket.js';
+import { WebSocketServer, WebSocket } from 'ws';
+import { ttyManager } from './tty-manager.js';
 import os from 'os';
 import { ProjectRegistry } from './project-registry.js';
 import { deriveProjectFromPath, deriveProjectFromDir } from './project-identity.js';
@@ -45,6 +47,40 @@ app.use(express.json());
 
 const server = createServer(app);
 const wsManager = new WebSocketManager(server);
+
+// TTY WebSocket — un WS dédié par terminal, routé via upgrade event
+const ttyWss = new WebSocketServer({ noServer: true });
+
+server.on('upgrade', (req, socket, head) => {
+  const url = req.url ?? '';
+  if (!url.startsWith('/ws/tty/')) return;
+  ttyWss.handleUpgrade(req, socket, head, (ws) => {
+    const ttyId = url.slice('/ws/tty/'.length);
+    const session = ttyManager.get(ttyId);
+    if (!session) {
+      ws.close(4004, 'TTY not found');
+      return;
+    }
+    const dataDisposable = session.pty.onData((data: string) => {
+      if (ws.readyState === WebSocket.OPEN) ws.send(data);
+    });
+    session.pty.onExit(({ exitCode }) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'exit', code: exitCode }));
+        ws.close();
+      }
+    });
+    ws.on('message', (raw: Buffer) => {
+      let msg: unknown;
+      try { msg = JSON.parse(raw.toString()); } catch { return; }
+      if (typeof msg !== 'object' || msg === null) return;
+      const m = msg as { type?: string; data?: string; cols?: number; rows?: number };
+      if (m.type === 'input' && typeof m.data === 'string') session.pty.write(m.data);
+      else if (m.type === 'resize' && m.cols && m.rows) session.pty.resize(m.cols, m.rows);
+    });
+    ws.on('close', () => dataDisposable.dispose());
+  });
+});
 
 // One workspace per project (building). Discovered lazily from incoming events.
 const registry = new ProjectRegistry();
@@ -1056,6 +1092,25 @@ app.post('/api/git-commit', async (req, res) => {
     console.error('Failed to refresh layout after git commit:', error);
     res.status(500).json({ error: 'Failed to refresh layout' });
   }
+});
+
+// ── TTY routes ──────────────────────────────────────────────────────────────
+
+app.post('/api/tty/spawn', (req, res) => {
+  const { projectId } = req.body ?? {};
+  const ws = typeof projectId === 'string' ? registry.get(projectId) : undefined;
+  const cwd = ws?.projectRoot ?? FALLBACK_PROJECT_ID;
+  const { ttyId, shell, cwd: sessionCwd, title, createdAt } = ttyManager.spawn(cwd);
+  res.json({ ttyId, shell, cwd: sessionCwd, title, createdAt });
+});
+
+app.delete('/api/tty/:id', (req, res) => {
+  ttyManager.kill(req.params.id);
+  res.status(204).end();
+});
+
+app.get('/api/tty', (_req, res) => {
+  res.json(ttyManager.list());
 });
 
 // Load persisted state before starting server
