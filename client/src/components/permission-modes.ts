@@ -3,11 +3,11 @@
 // 'default' prompts a human; 'auto' uses a model classifier; 'bypassPermissions'
 // skips checks; 'plan' runs no tools. Shared by SpawnPanel and AgentChatPanel.
 export const PERMISSION_MODE_OPTIONS: { value: string; label: string }[] = [
-  { value: 'default', label: 'Demander (modal)' },
-  { value: 'acceptEdits', label: 'Auto-éditions' },
-  { value: 'plan', label: 'Plan — aucun outil' },
-  { value: 'auto', label: 'Auto — classifieur IA' },
-  { value: 'bypassPermissions', label: 'Bypass — aucun contrôle' },
+  { value: 'default', label: 'Modal' },
+  { value: 'acceptEdits', label: 'Auto-édit.' },
+  { value: 'plan', label: 'Plan' },
+  { value: 'auto', label: 'Auto (IA)' },
+  { value: 'bypassPermissions', label: 'Bypass' },
 ];
 
 // Short label for a mode value (falls back to the raw value for unknowns).

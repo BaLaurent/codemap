@@ -25,7 +25,7 @@ const C = { ink: '#3A2E12', border: '#4A3B1A', gold: '#FFE040', cream: '#FFF8E6'
 
 const panel: CSSProperties = {
   position: 'absolute', right: 16, bottom: 16, zIndex: 25,
-  width: 'min(360px, 92vw)', height: 'min(52vh, 520px)',
+  width: 'min(420px, 92vw)', height: 'min(52vh, 520px)',
   display: 'flex', flexDirection: 'column', fontFamily: 'monospace',
   background: C.cream, color: C.ink,
   border: `4px solid ${C.border}`, boxShadow: '8px 8px 0 rgba(0,0,0,0.35)',
@@ -48,7 +48,7 @@ const subBar: CSSProperties = {
 
 const modeSelect: CSSProperties = {
   fontFamily: 'monospace', fontSize: 11, color: C.ink, background: '#fff',
-  border: `2px solid ${C.border}`, padding: '2px 4px', maxWidth: '60%',
+  border: `2px solid ${C.border}`, padding: '2px 4px', flex: 1, minWidth: 0,
 };
 
 const transcript: CSSProperties = { flex: 1, overflowY: 'auto', padding: 10, fontSize: 13, lineHeight: 1.4 };
@@ -441,7 +441,7 @@ export function AgentChatPanel({ agentName, messages, dead, isThinking, commands
           onChange={e => changeModel(e.target.value)}
           title="Modèle (à chaud)"
         >
-          {modelOptions.map(o => <option key={o.value} value={o.value}>🧠 {o.label}</option>)}
+          {modelOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
         <select
           style={modeSelect}
@@ -450,7 +450,7 @@ export function AgentChatPanel({ agentName, messages, dead, isThinking, commands
           onChange={e => changeMode(e.target.value)}
           title="Mode de permission (à chaud)"
         >
-          {PERMISSION_MODE_OPTIONS.map(o => <option key={o.value} value={o.value}>🛡 {o.label}</option>)}
+          {PERMISSION_MODE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
         <select
           style={modeSelect}
@@ -459,7 +459,7 @@ export function AgentChatPanel({ agentName, messages, dead, isThinking, commands
           onChange={e => changeEffort(e.target.value)}
           title={EFFORT_TOOLTIP}
         >
-          {EFFORT_OPTIONS.map(o => <option key={o.value} value={o.value}>💭 {o.label}</option>)}
+          {EFFORT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
       </div>
 

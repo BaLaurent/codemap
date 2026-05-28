@@ -9,13 +9,13 @@
 export interface EffortOption { value: string; label: string }
 
 export const EFFORT_OPTIONS: EffortOption[] = [
-  { value: 'default', label: 'Adaptatif (par défaut)' },
-  { value: 'low',     label: '🪶 Bas' },
-  { value: 'medium',  label: '⚖ Moyen' },
-  { value: 'high',    label: '🧠 Élevé' },
-  { value: 'xhigh',   label: '🧠✨ Très élevé (Opus 4.7)' },
-  { value: 'max',     label: '🚀 Maximum' },
-  { value: 'off',     label: '🚫 Désactivé' },
+  { value: 'default', label: 'Adaptatif' },
+  { value: 'low',     label: 'Bas' },
+  { value: 'medium',  label: 'Moyen' },
+  { value: 'high',    label: 'Élevé' },
+  { value: 'xhigh',   label: 'Très élevé' },
+  { value: 'max',     label: 'Maximum' },
+  { value: 'off',     label: 'Désactivé' },
 ];
 
 /** Tooltip text reused by both selectors so the on/off-on-recent-models caveat
