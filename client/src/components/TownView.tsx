@@ -65,7 +65,6 @@ export function TownView({ selected, onSelect, focusRequest, actionRequest }: {
         drawBuilding(ctx, {
           x: b.x, y: b.y, w: BUILDING_SIZE.w, h: BUILDING_SIZE.h,
           name: b.projectName,
-          floorCount: Math.max(2, b.agentCount + 2),
           agentCount: b.agentCount,
           active: Date.now() - b.lastActivity < 60000,
           hovered: hoverRef.current === b.projectId,

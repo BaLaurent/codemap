@@ -1,10 +1,10 @@
 import { seededRandom, adjustBrightness } from './utils';
+import { buildingFloorCount, buildingNameSignRect } from '../layout/town-layout';
 
 export interface BuildingFacadeOpts {
   x: number; y: number; w: number; h: number;
   name: string;
-  floorCount: number;   // visual height cue (clamped)
-  agentCount: number;   // lit windows
+  agentCount: number;   // drives both floor count (visual height) and lit windows
   active: boolean;      // recently active → brighter
   hovered: boolean;
   seed: number;         // stable per project → picks the facade variant
@@ -19,10 +19,13 @@ const GLASS_UNLIT = '#A8D0E8';  // hotel window glass (was near-black)
 const GLASS_LIT = '#FFE27A';    // warm lit window (kept)
 
 // Pixel-art building facade: flat fills, dark outlines, warm daytime palette.
-// Window-grid height scales with floorCount; lit windows scale with agentCount.
+// Window-grid height scales with agentCount (more agents → taller building);
+// the same agentCount lights up the corresponding number of windows. The
+// facade geometry helpers in town-layout.ts are the single source of truth so
+// the hit-test (✕ badge) lines up with what we paint.
 export function drawBuilding(ctx: CanvasRenderingContext2D, o: BuildingFacadeOpts): void {
   const rnd = (n: number) => seededRandom(o.seed + n);
-  const floors = Math.max(2, Math.min(8, o.floorCount || 2));
+  const floors = buildingFloorCount(o.agentCount);
   const cols = 3 + Math.floor(rnd(2) * 3);            // 3–5 window columns
   const roofStyle = Math.floor(rnd(3) * 3);           // 0 flat · 1 pitched · 2 stepped
   const hasAwning = rnd(4) > 0.5;
@@ -94,13 +97,15 @@ export function drawBuilding(ctx: CanvasRenderingContext2D, o: BuildingFacadeOpt
   ctx.fillStyle = '#E8C860';   // door knob
   ctx.fillRect(doorX + doorW - 9, doorY + doorH / 2, 3, 3);
 
-  // Name sign — warm wood plaque.
+  // Name sign — warm wood plaque. Geometry lives in town-layout so the close
+  // badge (hit-test) can anchor to the exact same rect.
+  const sign = buildingNameSignRect({ x: o.x, y: o.y, agentCount: o.agentCount });
   ctx.fillStyle = '#4A3B1A';
-  ctx.fillRect(o.x, bodyTop - 38, o.w, 22);
+  ctx.fillRect(sign.x, sign.y, sign.w, sign.h);
   ctx.fillStyle = '#FFF8E8';
   ctx.font = 'bold 14px monospace';
   ctx.textAlign = 'center';
-  ctx.fillText(o.name.slice(0, 18), o.x + o.w / 2, bodyTop - 22);
+  ctx.fillText(o.name.slice(0, 18), sign.x + sign.w / 2, sign.y + sign.h - 6);
   ctx.textAlign = 'left';
 }
 

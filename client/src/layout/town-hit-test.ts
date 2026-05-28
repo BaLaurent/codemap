@@ -1,12 +1,15 @@
-import { PlacedBuilding, BUILDING_SIZE } from './town-layout';
+import { PlacedBuilding, BUILDING_SIZE, buildingNameSignRect } from './town-layout';
 
 export type TownHit = { building: PlacedBuilding; region: 'body' | 'close' } | null;
 
-// Size (px) of the ✕ badge anchored at a pinned building's top-right corner.
+// Size (px) of the ✕ badge. It rides the top-right corner of the project-name
+// plaque so it always visually belongs to the name — see buildingNameSignRect
+// for the single source of truth on plaque geometry.
 const CLOSE = 16;
 
 export function closeBadgeRect(b: PlacedBuilding): { x: number; y: number; w: number; h: number } {
-  return { x: b.x + BUILDING_SIZE.w - CLOSE, y: b.y, w: CLOSE, h: CLOSE };
+  const sign = buildingNameSignRect(b);
+  return { x: sign.x + sign.w - CLOSE, y: sign.y + (sign.h - CLOSE) / 2, w: CLOSE, h: CLOSE };
 }
 
 // Resolve what a click at (mx,my) hits. The close badge (pinned only) is tested

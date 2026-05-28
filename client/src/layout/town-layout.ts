@@ -32,6 +32,29 @@ export function layoutTown(projects: ProjectInfo[]): PlacedBuilding[] {
 
 export const BUILDING_SIZE = { w: BUILDING_W, h: BUILDING_H };
 
+// --- Facade geometry (shared between drawer and hit-test) ----------------
+// The facade height grows with agent count (more agents = taller building).
+// Both the renderer (drawing/building.ts) and the hit-test (town-hit-test.ts)
+// need the same numbers — the ✕ badge must sit exactly on the name plaque the
+// renderer paints. Anything that needs to derive coordinates from a building's
+// activity uses these helpers; no module re-implements the formula.
+
+// Number of visible floors on a building, clamped to the renderer's range.
+export function buildingFloorCount(agentCount: number): number {
+  return Math.max(2, Math.min(8, agentCount + 2));
+}
+
+// Top-of-body Y in world coordinates. Everything above this line is roof.
+export function buildingBodyTop(b: { y: number; agentCount: number }): number {
+  return b.y + BUILDING_H - (buildingFloorCount(b.agentCount) * 28 + 40);
+}
+
+// Pixel rect of the warm-wood name plaque painted above the body. The close
+// badge anchors to its top-right corner so it always lines up with the name.
+export function buildingNameSignRect(b: { x: number; y: number; agentCount: number }): { x: number; y: number; w: number; h: number } {
+  return { x: b.x, y: buildingBodyTop(b) - 38, w: BUILDING_W, h: 22 };
+}
+
 // --- Street furniture geometry -------------------------------------------
 // The town reads as a top-down map (like the hotel's grass exterior) with
 // front-facing building facades. Each row of buildings stands on a continuous
