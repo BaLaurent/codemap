@@ -130,6 +130,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       body: JSON.stringify({ model }),
     }).catch(console.error);
   };
+  const setEffortForAgent = (agentId: string, effort: string) => {
+    fetch(`${API_URL}/agent/${agentId}/effort`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ effort }),
+    }).catch(console.error);
+  };
   // Upload one or more files to the agent's attachment folder. Returns the
   // absolute paths so the panel can mention them in the draft.
   const attachFiles = async (agentId: string, files: File[]): Promise<string[]> => {
@@ -172,8 +178,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             models={chatModels}
             model={agent?.model}
             mode={agent?.permissionMode}
+            effort={agent?.effort}
             onModelChange={model => setModelForAgent(chatAgentId, model)}
             onModeChange={mode => setModeForAgent(chatAgentId, mode)}
+            onEffortChange={effort => setEffortForAgent(chatAgentId, effort)}
             onSend={content => sendChat(chatAgentId, content)}
             onStop={() => { stopChat(chatAgentId); closeChat(); }}
             onClose={closeChat}

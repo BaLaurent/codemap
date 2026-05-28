@@ -6,6 +6,7 @@ import { useState, type CSSProperties } from 'react';
 import type { ModelOption, SubagentOption } from '../types';
 import { PERMISSION_MODE_OPTIONS } from './permission-modes';
 import { buildModelOptions } from './model-options';
+import { EFFORT_OPTIONS, EFFORT_TOOLTIP } from './effort-options-ui';
 
 const C = { ink: '#3A2E12', border: '#4A3B1A', gold: '#FFE040', cream: '#FFF8E6' };
 
@@ -28,7 +29,13 @@ export interface SpawnRequest {
   permissionMode: string;
   model?: string;
   agent?: string;
+  /** Effort knob for thinking depth. Sent as-is; the server whitelists it.
+   *  Values: 'low'|'medium'|'high'|'xhigh'|'max'|'off' (off → thinking disabled).
+   *  Undefined → not sent → SDK adaptive default (Opus 4.6+). */
+  effort?: string;
 }
+
+// (effort presets live in effort-options-ui.ts so the chat panel reuses them)
 
 export function SpawnPanel({ models, agents, onSpawn, onClose }: {
   models: ModelOption[];
@@ -40,6 +47,7 @@ export function SpawnPanel({ models, agents, onSpawn, onClose }: {
   const [permissionMode, setPermissionMode] = useState('default');
   const [model, setModel] = useState('default');  // 'default' → CLI default
   const [agent, setAgent] = useState('');           // '' → no specific subagent
+  const [effort, setEffort] = useState('default'); // 'default' → don't pass to SDK
 
   const launch = () => {
     const initialPrompt = draft.trim();
@@ -48,6 +56,7 @@ export function SpawnPanel({ models, agents, onSpawn, onClose }: {
       initialPrompt, permissionMode,
       model: model && model !== 'default' ? model : undefined,
       agent: agent || undefined,
+      effort: effort && effort !== 'default' ? effort : undefined,
     });
   };
 
@@ -86,6 +95,13 @@ export function SpawnPanel({ models, agents, onSpawn, onClose }: {
         <select style={field} value={agent} onChange={e => setAgent(e.target.value)}>
           <option value="">Défaut</option>
           {agents.map(a => <option key={a.name} value={a.name}>{a.name}</option>)}
+        </select>
+      </div>
+
+      <div>
+        <div style={label}>Effort de réflexion</div>
+        <select style={field} value={effort} onChange={e => setEffort(e.target.value)} title={EFFORT_TOOLTIP}>
+          {EFFORT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
       </div>
 

@@ -7,7 +7,7 @@
 // permissionMode decides when the SDK calls it (only 'default' opens the human
 // modal; 'bypassPermissions' skips checks, 'auto' lets a model classifier decide,
 // 'plan' runs no tools).
-import { query, type Query, type CanUseTool, type PermissionMode, type PermissionResult } from '@anthropic-ai/claude-agent-sdk';
+import { query, type Query, type CanUseTool, type PermissionMode, type PermissionResult, type EffortLevel, type ThinkingConfig } from '@anthropic-ai/claude-agent-sdk';
 import { SessionInput } from './session-input.js';
 import { fetchCapabilities, getCachedCapabilities } from './capabilities.js';
 import type { AgentCapabilities, InteractionOutcome } from '../types.js';
@@ -23,7 +23,15 @@ export interface PermissionRequest {
 
 export interface RunnerCallbacks {
   onChat: (agentId: string, role: 'user' | 'assistant', content: string) => void;
-  onToolUse: (agentId: string, name: string, input?: string) => void;
+  /** A tool_use block: `input` is the compact preview (chip), `fullInput` is the
+   *  JSON-stringified raw input for the expanded view, `toolUseId` couples this
+   *  call with its later tool_result. */
+  onToolUse: (agentId: string, name: string, input: string | undefined, toolUseId: string, fullInput: string) => void;
+  /** A tool_result block returned to the agent on the next user turn. The hotel
+   *  pairs it with the matching tool message by toolUseId for the expanded view. */
+  onToolResult: (agentId: string, toolUseId: string, content: string, isError: boolean) => void;
+  /** A thinking block (extended reasoning). Rendered as a collapsible 💭 bubble. */
+  onThinking: (agentId: string, content: string) => void;
   onPermission: (agentId: string, req: PermissionRequest) => Promise<InteractionOutcome>;
   onError: (agentId: string, message: string) => void;
   onEnd: (agentId: string) => void;
@@ -53,6 +61,37 @@ function previewToolInput(input: unknown): string | undefined {
   return text.length > 100 ? text.slice(0, 99) + '…' : text;
 }
 
+// Full JSON of the input for the expanded view. Pretty-printed so the panel can
+// drop it into a <pre> without further work; falls back to String() if input is
+// already a primitive (rare — tool_use inputs are always objects in practice).
+function stringifyToolInput(input: unknown): string {
+  if (input === undefined || input === null) return '';
+  if (typeof input === 'object') {
+    try { return JSON.stringify(input, null, 2); } catch { return String(input); }
+  }
+  return String(input);
+}
+
+// Flatten a tool_result `content` (string | array of blocks) to a single string
+// for the transcript. The SDK occasionally returns an array — e.g. for image
+// results or multi-part outputs — so we walk it and keep the text parts.
+function flattenToolResultContent(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content
+    .map(part => {
+      if (typeof part === 'string') return part;
+      if (part && typeof part === 'object' && 'text' in part && typeof (part as { text: unknown }).text === 'string') {
+        return (part as { text: string }).text;
+      }
+      // Non-text parts (image blocks, etc.) are kept as a hint, not the bytes.
+      if (part && typeof part === 'object' && 'type' in part) return `[${(part as { type: string }).type}]`;
+      return '';
+    })
+    .filter(Boolean)
+    .join('\n');
+}
+
 // Translate the hotel user's decision into the SDK's allow/deny shape. Allow
 // echoes the original input unchanged; deny/timeout become a denial with a reason.
 export function outcomeToPermissionResult(outcome: InteractionOutcome, input: Record<string, unknown>): PermissionResult {
@@ -61,14 +100,63 @@ export function outcomeToPermissionResult(outcome: InteractionOutcome, input: Re
   return { behavior: 'deny', message: reason };
 }
 
+// Pure dispatcher: take one SDK message, route every relevant content block to
+// the right callback. Extracted from the spawnAgent pump so it can be tested
+// without spinning up a real SDK session.
+//
+// Block coverage:
+//   assistant.text       → onChat   (markdown rendered client-side)
+//   assistant.tool_use   → onToolUse (compact chip + dropdown w/ full input)
+//   assistant.thinking   → onThinking (collapsible 💭 bubble)
+//   user.tool_result     → onToolResult (paired with its tool_use by id)
+// The user turn is where the SDK loops tool outputs back in; we only forward
+// tool_result blocks, never the original user text (already emitted by us via
+// sendMessage → broadcastChat as a 'user' line). 'result' (turn done) is a no-op.
+export function dispatchSdkMessage(message: unknown, agentId: string, cb: RunnerCallbacks): void {
+  if (!message || typeof message !== 'object' || !('type' in message)) return;
+  const m = message as { type: string };
+  if (m.type === 'assistant') {
+    const blocks = (message as { message?: { content?: Array<{ type: string; text?: string; name?: string; input?: unknown; id?: string; thinking?: string }> } })
+      .message?.content ?? [];
+    for (const block of blocks) {
+      if (block.type === 'text') {
+        const text = block.text?.trim();
+        if (text) cb.onChat(agentId, 'assistant', text);
+      } else if (block.type === 'tool_use' && block.name && block.id) {
+        cb.onToolUse(agentId, block.name, previewToolInput(block.input), block.id, stringifyToolInput(block.input));
+      } else if (block.type === 'thinking') {
+        const text = block.thinking?.trim();
+        if (text) cb.onThinking(agentId, text);
+      }
+    }
+  } else if (m.type === 'user') {
+    const blocks = (message as { message?: { content?: unknown } }).message?.content;
+    if (Array.isArray(blocks)) {
+      for (const block of blocks as Array<{ type: string; tool_use_id?: string; content?: unknown; is_error?: boolean }>) {
+        if (block.type === 'tool_result' && block.tool_use_id) {
+          cb.onToolResult(agentId, block.tool_use_id, flattenToolResultContent(block.content), Boolean(block.is_error));
+        }
+      }
+    }
+  }
+}
+
 export function spawnAgent(
   opts: {
     agentId: string; cwd: string; projectId?: string; initialPrompt: string;
     permissionMode?: PermissionMode; model?: string; agent?: string;
+    /** Per-spawn effort level (SDK `effort`), guides thinking depth. Omit to
+     *  let the SDK pick its default (adaptive on Opus 4.6+). The SDK has no
+     *  runtime setter for this, so it can only be set at spawn time. */
+    effort?: EffortLevel;
+    /** Per-spawn thinking config (SDK `thinking`). Used to explicitly disable
+     *  thinking (`{ type: 'disabled' }`) — for adaptive/enabled, prefer the
+     *  default behaviour or the `effort` knob. */
+    thinking?: ThinkingConfig;
   },
   cb: RunnerCallbacks,
 ): void {
-  const { agentId, cwd, projectId, initialPrompt, permissionMode = 'default', model, agent } = opts;
+  const { agentId, cwd, projectId, initialPrompt, permissionMode = 'default', model, agent, effort, thinking } = opts;
   const input = new SessionInput();
   input.push(initialPrompt, agentId);
 
@@ -99,6 +187,11 @@ export function spawnAgent(
       // Optional spawn-form picks; omitted falls back to the CLI defaults.
       ...(model ? { model } : {}),
       ...(agent ? { agent } : {}),
+      // Reasoning depth knobs (see SDK docs/effort and docs/adaptive-thinking).
+      // `effort` modulates the adaptive thinking budget; `thinking` is only set
+      // when the user explicitly wants to disable extended thinking entirely.
+      ...(effort ? { effort } : {}),
+      ...(thinking ? { thinking } : {}),
       // Opt into bypass capability up front so switching to bypassPermissions
       // mid-session actually skips checks (the active mode still governs: in
       // 'default' tools are still prompted via canUseTool).
@@ -116,21 +209,7 @@ export function spawnAgent(
   // life. Iterate content blocks IN ORDER so a tool call lands between the text
   // that precedes and follows it (not lumped after everything).
   (async () => {
-    for await (const message of q) {
-      if (message.type === 'assistant') {
-        const blocks = (message as { message?: { content?: Array<{ type: string; text?: string; name?: string; input?: unknown }> } })
-          .message?.content ?? [];
-        for (const block of blocks) {
-          if (block.type === 'text') {
-            const text = block.text?.trim();
-            if (text) cb.onChat(agentId, 'assistant', text);
-          } else if (block.type === 'tool_use' && block.name) {
-            cb.onToolUse(agentId, block.name, previewToolInput(block.input));
-          }
-        }
-      }
-      // 'result' marks a turn done; we keep the session open for the next turn.
-    }
+    for await (const message of q) dispatchSdkMessage(message, agentId, cb);
     sessions.delete(agentId);
     cb.onEnd(agentId);
   })().catch((err: unknown) => {
@@ -177,6 +256,23 @@ export async function setModel(agentId: string, model?: string): Promise<boolean
   if (!session) return false;
   const target = model && model !== 'default' ? model : undefined;
   await session.query.setModel?.(target);
+  return true;
+}
+
+// Tune the live session's thinking budget. The SDK has no `setEffort`, only
+// the deprecated `setMaxThinkingTokens(n|null)`: that's the only runtime knob,
+// so we use it and accept its quirks (on Opus 4.6+ it is on/off only — see
+// effortToMaxThinkingTokens for the mapping rationale).
+//
+// `tokens === null` clears the limit (back to the model's default behaviour);
+// `tokens === 0` disables extended thinking outright; positive N is the budget
+// for models that read it as such. Returns false if there's no live session
+// or the SDK build doesn't expose the setter.
+export async function setMaxThinkingTokens(agentId: string, tokens: number | null): Promise<boolean> {
+  const session = sessions.get(agentId);
+  if (!session) return false;
+  if (!session.query.setMaxThinkingTokens) return false;
+  await session.query.setMaxThinkingTokens(tokens);
   return true;
 }
 

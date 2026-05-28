@@ -16,8 +16,9 @@ import { appendChatMessage, getTranscript, clearTranscripts } from './transcript
 import { attachmentDir, reserveAttachmentPath } from './attachments.js';
 import { fileFromActivityEvent } from './agent-file.js';
 import { registerRequest, awaitDecision, resolveRequest, resolveAgentRequests } from './pending-requests.js';
-import { spawnAgent, sendMessage as runnerSendMessage, stopAgent, getAgentCapabilities, getProjectCapabilities, setMode as runnerSetMode, setModel as runnerSetModel, isRunning, type PermissionRequest } from './agent-runner/index.js';
+import { spawnAgent, sendMessage as runnerSendMessage, stopAgent, getAgentCapabilities, getProjectCapabilities, setMode as runnerSetMode, setModel as runnerSetModel, setMaxThinkingTokens as runnerSetMaxThinkingTokens, isRunning, type PermissionRequest } from './agent-runner/index.js';
 import type { PermissionMode } from '@anthropic-ai/claude-agent-sdk';
+import { resolveEffortOptions, effortToMaxThinkingTokens, isEffortValue } from './effort-options.js';
 
 const PORT = 5174; // Fixed port - never change
 
@@ -542,8 +543,23 @@ app.post('/api/agent/:agentId/permission', (req, res) => {
 // --- Hotel-spawned agents (Phase C) ----------------------------------------
 // Spawn a Claude agent in-process and chat with it from the hotel. Its own hooks
 // report under the forced sessionId, so it shows up as a normal hotel character.
-function broadcastChat(agentId: string, role: ChatMessage['role'], content: string, tool?: ChatMessage['tool']): void {
-  const msg: ChatMessage = { agentId, role, content, timestamp: Date.now(), ...(tool ? { tool } : {}) };
+// Single chat-line emitter: every shape (assistant text, tool_use, thinking,
+// tool_result) goes through here so the transcript store and the WS broadcast
+// stay in lockstep. `extra` carries the role-specific top-level fields
+// (toolUseId/isError on tool_result) while `tool` carries tool_use details.
+function broadcastChat(
+  agentId: string,
+  role: ChatMessage['role'],
+  content: string,
+  tool?: ChatMessage['tool'],
+  extra?: { toolUseId?: string; isError?: boolean },
+): void {
+  const msg: ChatMessage = {
+    agentId, role, content, timestamp: Date.now(),
+    ...(tool ? { tool } : {}),
+    ...(extra?.toolUseId ? { toolUseId: extra.toolUseId } : {}),
+    ...(extra?.isError ? { isError: true } : {}),
+  };
   appendChatMessage(msg);
   wsManager.broadcast('chat', msg);
 }
@@ -573,7 +589,7 @@ async function requestPermission(agentId: string, req: PermissionRequest): Promi
 }
 
 app.post('/api/agent/spawn', (req, res) => {
-  const { projectId, cwd, initialPrompt, permissionMode, model, agent } = req.body ?? {};
+  const { projectId, cwd, initialPrompt, permissionMode, model, agent, effort } = req.body ?? {};
   if (!initialPrompt || typeof initialPrompt !== 'string') {
     res.status(400).json({ error: 'initialPrompt required' });
     return;
@@ -597,20 +613,29 @@ app.post('/api/agent/spawn', (req, res) => {
   state.spawned = true;  // chattable from the roster
   state.permissionMode = mode;  // shown in the chat header
   if (typeof model === 'string' && model) state.model = model;
+  // Remember the spawn-form effort so the chat panel's selector reflects it
+  // straight away; the runtime POST /effort updates this later.
+  if (isEffortValue(effort)) state.effort = effort;
   refreshAgentCounts();
   wsManager.broadcast('thinking', getAgentStatesArray());
 
   broadcastChat(agentId, 'user', initialPrompt);
+  const effortOpts = resolveEffortOptions(effort);
   spawnAgent(
     {
       agentId, cwd: workdir, projectId: typeof projectId === 'string' ? projectId : undefined,
       initialPrompt, permissionMode: mode,
       model: typeof model === 'string' && model ? model : undefined,
       agent: typeof agent === 'string' && agent ? agent : undefined,
+      ...effortOpts,
     },
     {
       onChat: (id, role, content) => broadcastChat(id, role, content),
-      onToolUse: (id, name, input) => broadcastChat(id, 'tool', '', { name, input }),
+      onToolUse: (id, name, input, toolUseId, fullInput) =>
+        broadcastChat(id, 'tool', '', { name, input, toolUseId, fullInput }),
+      onToolResult: (id, toolUseId, content, isError) =>
+        broadcastChat(id, 'tool_result', content, undefined, { toolUseId, isError }),
+      onThinking: (id, content) => broadcastChat(id, 'thinking', content),
       onPermission: (id, request) => requestPermission(id, request),
       onError: (id, message) => {
         console.error(`[${new Date().toISOString()}] agent ${id} SDK session crashed: ${message}`);
@@ -735,6 +760,31 @@ app.post('/api/agent/:agentId/mode', async (req, res) => {
       if (state) state.waitingForInput = false;
     }
     wsManager.broadcast('thinking', getAgentStatesArray());
+  }
+  res.status(200).json({ ok });
+});
+
+// Tune a live session's thinking effort. The SDK has no setEffort, so under the
+// hood we map the user's effort label to a max-thinking-tokens budget and call
+// the (deprecated-but-only) Query.setMaxThinkingTokens. On Opus 4.6+ the SDK
+// treats it as on/off; on older models the budget gradient takes effect. The
+// chat panel's tooltip mentions this so the user isn't misled.
+app.post('/api/agent/:agentId/effort', async (req, res) => {
+  const { agentId } = req.params;
+  const effort = req.body?.effort;
+  if (!isEffortValue(effort)) {
+    res.status(400).json({ error: `effort must be one of default|low|medium|high|xhigh|max|off` });
+    return;
+  }
+  const tokens = effortToMaxThinkingTokens(effort);
+  // effortToMaxThinkingTokens returns undefined ONLY when the input isn't a
+  // known effort — isEffortValue already rejected that case, so this is unreachable
+  // in normal flow. Belt-and-suspenders: treat it as a no-op rather than crash.
+  if (tokens === undefined) { res.status(200).json({ ok: false }); return; }
+  const ok = await runnerSetMaxThinkingTokens(agentId, tokens);
+  if (ok) {
+    const state = agentStates.get(agentId);
+    if (state) { state.effort = effort; wsManager.broadcast('thinking', getAgentStatesArray()); }
   }
   res.status(200).json({ ok });
 });

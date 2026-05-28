@@ -41,14 +41,23 @@ export interface PendingRequest {
   description?: string;  // permission only: SDK-rendered subtitle
 }
 
-/** A chat line for a hotel-spawned agent: user turn, assistant/system reply, or
- *  a tool call the agent made (rendered compactly in the transcript). */
+/** A chat line for a hotel-spawned agent. One ChatMessage per content block
+ *  the SDK yields (text → assistant, tool_use → tool, thinking → thinking,
+ *  tool_result → tool_result). The panel pairs tool + tool_result by toolUseId
+ *  at render time to show the call's input and its output together. */
 export interface ChatMessage {
   agentId: string;
-  role: 'user' | 'assistant' | 'system' | 'tool';
-  content: string;
+  role: 'user' | 'assistant' | 'system' | 'tool' | 'thinking' | 'tool_result';
+  content: string;       // assistant markdown / thinking text / tool_result text / user-system notice
   timestamp: number;
-  tool?: { name: string; input?: string };  // role 'tool' only: tool name + input preview
+  /** role 'tool' only: the call the agent issued. `input` is a short preview
+   *  for the compact chip; `fullInput` is the JSON-stringified raw input for
+   *  the expanded view; `toolUseId` couples this call with its `tool_result`. */
+  tool?: { name: string; input?: string; fullInput?: string; toolUseId?: string };
+  /** role 'tool_result' only: the toolUseId of the call this result answers. */
+  toolUseId?: string;
+  /** role 'tool_result' only: SDK error flag on the tool_result block. */
+  isError?: boolean;
 }
 
 /** A slash command or skill the live SDK session can run (from supportedCommands). */
@@ -97,6 +106,7 @@ export interface AgentThinkingState {
   agentType?: string;  // Agent type (Plan, Explore, Bash, etc.)
   model?: string;  // Model name (e.g., "claude-3.5-sonnet")
   permissionMode?: string;  // Spawned agents: current permission mode
+  effort?: string;          // Spawned agents: current thinking effort (default/low/medium/high/xhigh/max/off)
   lastDuration?: number;  // Last operation duration in ms
   status?: AgentStatus;  // Completion status (completed/aborted/error)
   statusTimestamp?: number;  // When status was set

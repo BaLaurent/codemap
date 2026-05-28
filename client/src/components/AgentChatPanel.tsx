@@ -1,11 +1,25 @@
 // Chat panel for a hotel-spawned agent: shows the transcript (user/assistant/
-// system lines streamed over WS) and lets the user send new turns. Same pixel-art
-// palette as the interaction modal.
-import { useState, useRef, useEffect, type CSSProperties, type ClipboardEvent } from 'react';
+// system/tool/thinking lines streamed over WS) and lets the user send new turns.
+// Same pixel-art palette as the interaction modal.
+//
+// Rendering by role:
+//   - assistant  → markdown via react-markdown + remark-gfm (GFM tables, code fences, etc.)
+//   - user       → plain text bubble, pre-wrap preserved
+//   - system     → centered italic notice
+//   - tool       → <ToolCall> compact 🔧 chip + <details> with full input and
+//                  the paired tool_result (looked up by toolUseId)
+//   - thinking   → <ThinkingBubble> 💭 collapsed by default, markdown inside
+//   - tool_result → NOT rendered standalone (consumed by its tool above);
+//                  orphan results fall back to a discreet system line
+import { useState, useRef, useEffect, useMemo, type CSSProperties, type ClipboardEvent, type ReactNode } from 'react';
+import ReactMarkdown, { type Components } from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import remarkBreaks from 'remark-breaks';
 import type { ChatMessage, SlashCommand, ModelOption } from '../types';
 import { CompletionInput } from './chat-completion';
 import { PERMISSION_MODE_OPTIONS } from './permission-modes';
 import { buildModelOptions } from './model-options';
+import { EFFORT_OPTIONS, EFFORT_TOOLTIP } from './effort-options-ui';
 
 const C = { ink: '#3A2E12', border: '#4A3B1A', gold: '#FFE040', cream: '#FFF8E6' };
 
@@ -59,27 +73,188 @@ const attachStatus: CSSProperties = {
   padding: '0 10px 6px', fontSize: 11, fontStyle: 'italic', color: C.ink, opacity: 0.7,
 };
 
-function bubbleStyle(role: ChatMessage['role']): CSSProperties {
-  if (role === 'user') {
-    return { alignSelf: 'flex-end', background: '#FFF0B8', border: `2px solid ${C.border}`, padding: '5px 8px', marginBottom: 6, maxWidth: '85%', whiteSpace: 'pre-wrap', wordBreak: 'break-word' };
-  }
-  if (role === 'system') {
-    return { alignSelf: 'center', fontStyle: 'italic', opacity: 0.7, margin: '6px 0', fontSize: 12 };
-  }
-  if (role === 'tool') {
-    // Compact monospace chip for a tool call the agent made.
-    return { alignSelf: 'flex-start', background: '#EFE6CF', border: `1px dashed ${C.border}`, padding: '2px 6px', marginBottom: 4, maxWidth: '92%', fontSize: 11, opacity: 0.85, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
-  }
-  return { alignSelf: 'flex-start', background: '#fff', border: `2px solid rgba(74,59,26,0.4)`, padding: '5px 8px', marginBottom: 6, maxWidth: '85%', whiteSpace: 'pre-wrap', wordBreak: 'break-word' };
+const bubbleBase: CSSProperties = { marginBottom: 6, maxWidth: '92%', wordBreak: 'break-word' };
+
+const userBubble: CSSProperties = {
+  ...bubbleBase, alignSelf: 'flex-end',
+  background: '#FFF0B8', border: `2px solid ${C.border}`,
+  padding: '5px 8px', maxWidth: '85%', whiteSpace: 'pre-wrap',
+};
+
+const assistantBubble: CSSProperties = {
+  ...bubbleBase, alignSelf: 'flex-start',
+  background: '#fff', border: `2px solid rgba(74,59,26,0.4)`,
+  padding: '5px 8px', maxWidth: '85%',
+};
+
+const systemBubble: CSSProperties = {
+  alignSelf: 'center', fontStyle: 'italic', opacity: 0.7,
+  margin: '6px 0', fontSize: 12,
+};
+
+const toolWrap: CSSProperties = {
+  ...bubbleBase, alignSelf: 'flex-start',
+  border: `1px dashed ${C.border}`, background: '#EFE6CF',
+  fontSize: 11, opacity: 0.95,
+};
+
+// <summary> reset so the disclosure caret appears as our own ▸ glyph and the
+// row reads as a compact chip when collapsed (chip rendering + expand control
+// share one element, avoiding a second header row).
+const toolSummary: CSSProperties = {
+  cursor: 'pointer', listStyle: 'none', padding: '2px 6px',
+  display: 'flex', gap: 4, alignItems: 'baseline', overflow: 'hidden',
+};
+
+const toolName: CSSProperties = { fontWeight: 700, whiteSpace: 'nowrap' };
+
+const toolPreview: CSSProperties = {
+  flex: 1, minWidth: 0, whiteSpace: 'nowrap',
+  overflow: 'hidden', textOverflow: 'ellipsis', opacity: 0.85,
+};
+
+const toolDetails: CSSProperties = {
+  padding: '6px 8px', borderTop: `1px dashed ${C.border}`, background: '#F7F1DE',
+};
+
+const toolPre: CSSProperties = {
+  margin: '4px 0 0', padding: '6px 8px',
+  background: '#fff', border: `1px solid rgba(74,59,26,0.3)`,
+  fontFamily: 'monospace', fontSize: 11, whiteSpace: 'pre-wrap',
+  wordBreak: 'break-word', maxHeight: 240, overflow: 'auto',
+};
+
+const toolResultLabel: CSSProperties = { fontSize: 10, fontWeight: 700, opacity: 0.7, marginTop: 6 };
+
+const thinkingWrap: CSSProperties = {
+  ...bubbleBase, alignSelf: 'flex-start',
+  border: `1px dashed rgba(74,59,26,0.4)`, background: '#EFEAD8',
+  fontSize: 12, opacity: 0.9, fontStyle: 'italic',
+};
+
+const thinkingSummary: CSSProperties = {
+  cursor: 'pointer', listStyle: 'none', padding: '3px 8px',
+  display: 'flex', gap: 6, alignItems: 'baseline',
+};
+
+const thinkingDetails: CSSProperties = {
+  padding: '6px 8px', borderTop: `1px dashed rgba(74,59,26,0.4)`,
+  background: '#F5F1E1', fontStyle: 'normal',
+};
+
+const orphanResult: CSSProperties = { ...systemBubble, opacity: 0.5, fontSize: 11 };
+
+// Style hooks for react-markdown: keep the pixel-art skin, avoid leaking the
+// default white-on-blue link colour, and let code fences sit in a small framed
+// box. `pre`/`code` styling is matched to ToolCall's expanded content for visual
+// consistency between "agent wrote markdown" and "tool result text".
+const codeInline: CSSProperties = {
+  fontFamily: 'monospace', fontSize: '0.92em',
+  background: '#F1E7CC', padding: '0 4px', borderRadius: 2,
+};
+
+const codeBlock: CSSProperties = {
+  margin: '4px 0', padding: '6px 8px',
+  background: '#FFF8E6', border: `1px solid rgba(74,59,26,0.3)`,
+  fontFamily: 'monospace', fontSize: 12, whiteSpace: 'pre-wrap',
+  wordBreak: 'break-word', overflow: 'auto',
+};
+
+const mdLink: CSSProperties = { color: '#7B4500', textDecoration: 'underline' };
+
+const mdTable: CSSProperties = {
+  borderCollapse: 'collapse', margin: '4px 0', fontSize: 12,
+};
+
+const mdCell: CSSProperties = {
+  border: `1px solid rgba(74,59,26,0.4)`, padding: '2px 6px',
+};
+
+// Markdown components map: the cast keeps TS happy because `code` receives an
+// extra `inline` prop that ReactMarkdown injects at runtime but isn't typed.
+const markdownComponents: Components = {
+  // Use a span when the parent isn't `pre` (avoid <pre><pre>).
+  code(props) {
+    const { children, className, ...rest } = props as { children?: ReactNode; className?: string; inline?: boolean };
+    const isInline = !className;  // react-markdown sets className="language-…" on fences only
+    return isInline
+      ? <code style={codeInline} {...rest}>{children}</code>
+      : <code className={className} {...rest}>{children}</code>;
+  },
+  pre: ({ children }) => <pre style={codeBlock}>{children}</pre>,
+  a: ({ href, children }) => <a href={href} style={mdLink} target="_blank" rel="noopener noreferrer">{children}</a>,
+  table: ({ children }) => <table style={mdTable}>{children}</table>,
+  th: ({ children }) => <th style={mdCell}>{children}</th>,
+  td: ({ children }) => <td style={mdCell}>{children}</td>,
+  // Trim default top margin on the first/only paragraph so a one-line reply
+  // doesn't have extra whitespace above it inside the bubble.
+  p: ({ children }) => <p style={{ margin: '4px 0' }}>{children}</p>,
+  ul: ({ children }) => <ul style={{ margin: '4px 0', paddingLeft: 18 }}>{children}</ul>,
+  ol: ({ children }) => <ol style={{ margin: '4px 0', paddingLeft: 18 }}>{children}</ol>,
+  h1: ({ children }) => <h3 style={{ margin: '6px 0 2px', fontSize: 14 }}>{children}</h3>,
+  h2: ({ children }) => <h3 style={{ margin: '6px 0 2px', fontSize: 13 }}>{children}</h3>,
+  h3: ({ children }) => <h3 style={{ margin: '6px 0 2px', fontSize: 13 }}>{children}</h3>,
+};
+
+// `remark-breaks` turns single `\n` into <br>, matching the old `pre-wrap`
+// behaviour (and what Claude.ai's renderer does): agents rarely double-newline
+// their bullet items or short notes, and CommonMark would otherwise collapse
+// those lines into one paragraph.
+function MarkdownBody({ source }: { source: string }) {
+  return <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]} components={markdownComponents}>{source}</ReactMarkdown>;
 }
 
-// What to show for a message: a "🔧 Tool · input" chip for tool calls, else text.
-function lineText(m: ChatMessage): string {
-  if (m.role === 'tool' && m.tool) return `🔧 ${m.tool.name}${m.tool.input ? ` · ${m.tool.input}` : ''}`;
-  return m.content;
+function ToolCall({ msg, result }: { msg: ChatMessage; result?: ChatMessage }) {
+  const tool = msg.tool;
+  if (!tool) return null;
+  const preview = tool.input ?? '';
+  const full = tool.fullInput ?? tool.input ?? '';
+  const hasMore = full && full !== preview;
+  // Auto-expand failed tool calls — they're the ones the user actually needs to
+  // see at a glance; successes stay compact.
+  const defaultOpen = Boolean(result?.isError);
+  return (
+    <details style={toolWrap} open={defaultOpen}>
+      <summary style={toolSummary}>
+        <span>{result?.isError ? '⚠️' : '🔧'}</span>
+        <span style={toolName}>{tool.name}</span>
+        {preview && <span style={toolPreview}>· {preview}</span>}
+        <span style={{ opacity: 0.5, marginLeft: 'auto' }}>▸</span>
+      </summary>
+      <div style={toolDetails}>
+        {hasMore && (
+          <>
+            <div style={{ ...toolResultLabel, marginTop: 0 }}>INPUT</div>
+            <pre style={toolPre}>{full}</pre>
+          </>
+        )}
+        {result && (
+          <>
+            <div style={toolResultLabel}>{result.isError ? 'ERROR' : 'RESULT'}</div>
+            <pre style={{ ...toolPre, background: result.isError ? '#FFE9E0' : '#fff' }}>{result.content || '(empty)'}</pre>
+          </>
+        )}
+      </div>
+    </details>
+  );
 }
 
-export function AgentChatPanel({ agentName, messages, dead, commands, files, models, model, mode, onModelChange, onModeChange, onSend, onStop, onClose, onAttach }: {
+function ThinkingBubble({ content }: { content: string }) {
+  return (
+    <details style={thinkingWrap}>
+      <summary style={thinkingSummary}>
+        <span>💭</span>
+        <span>Réflexion ({content.length} car.)</span>
+        <span style={{ opacity: 0.5, marginLeft: 'auto' }}>▸</span>
+      </summary>
+      <div style={thinkingDetails}>
+        <MarkdownBody source={content} />
+      </div>
+    </details>
+  );
+}
+
+export function AgentChatPanel({ agentName, messages, dead, commands, files, models, model, mode, effort, onModelChange, onModeChange, onEffortChange, onSend, onStop, onClose, onAttach }: {
   agentName: string;
   messages: ChatMessage[];
   dead?: boolean;  // session ended/crashed → input is disabled
@@ -88,8 +263,10 @@ export function AgentChatPanel({ agentName, messages, dead, commands, files, mod
   models: ModelOption[];     // selectable models for the live session
   model?: string;            // current model value ('' / undefined → CLI default)
   mode?: string;             // current permission mode
+  effort?: string;           // current thinking effort (default/low/medium/high/xhigh/max/off)
   onModelChange: (model: string) => void;  // switch the live session's model
   onModeChange: (mode: string) => void;     // switch the live session's permission mode
+  onEffortChange: (effort: string) => void; // switch the live session's thinking effort
   onSend: (content: string) => void;
   onStop: () => void;
   onClose: () => void;
@@ -114,6 +291,25 @@ export function AgentChatPanel({ agentName, messages, dead, commands, files, mod
   useEffect(() => { setLocalModel(model || 'default'); }, [model]);
   const changeModel = (m: string) => { setLocalModel(m); onModelChange(m); };
   const modelOptions = buildModelOptions(models, localModel);
+
+  // Effort mirror, same optimistic-update pattern as mode/model.
+  const [localEffort, setLocalEffort] = useState(effort ?? 'default');
+  useEffect(() => { setLocalEffort(effort ?? 'default'); }, [effort]);
+  const changeEffort = (e: string) => { setLocalEffort(e); onEffortChange(e); };
+
+  // Build lookups in a single pass so the render loop stays O(n):
+  //  - resultsByToolUseId: each ToolCall finds its paired output in O(1).
+  //  - toolUseIdsSeen: each tool_result detects in O(1) whether it has a tool
+  //    parent (else it's orphan and needs the fallback notice).
+  const { resultsByToolUseId, toolUseIdsSeen } = useMemo(() => {
+    const results = new Map<string, ChatMessage>();
+    const seen = new Set<string>();
+    for (const m of messages) {
+      if (m.role === 'tool' && m.tool?.toolUseId) seen.add(m.tool.toolUseId);
+      if (m.role === 'tool_result' && m.toolUseId) results.set(m.toolUseId, m);
+    }
+    return { resultsByToolUseId: results, toolUseIdsSeen: seen };
+  }, [messages]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
@@ -166,6 +362,29 @@ export function AgentChatPanel({ agentName, messages, dead, commands, files, mod
     void uploadFiles(Array.from(list));
   };
 
+  const renderMessage = (m: ChatMessage, i: number) => {
+    switch (m.role) {
+      case 'user':
+        return <div key={i} style={userBubble}>{m.content}</div>;
+      case 'system':
+        return <div key={i} style={systemBubble}>{m.content}</div>;
+      case 'assistant':
+        return <div key={i} style={assistantBubble}><MarkdownBody source={m.content} /></div>;
+      case 'tool':
+        return <ToolCall key={i} msg={m} result={m.tool?.toolUseId ? resultsByToolUseId.get(m.tool.toolUseId) : undefined} />;
+      case 'thinking':
+        return <ThinkingBubble key={i} content={m.content} />;
+      case 'tool_result':
+        // Hidden when paired (consumed by its ToolCall above). Orphan results
+        // (tool message missing, e.g. transcript cap evicted it) get a tiny
+        // notice so they don't simply vanish.
+        if (m.toolUseId && toolUseIdsSeen.has(m.toolUseId)) return null;
+        return <div key={i} style={orphanResult}>↳ résultat orphelin · {m.content.slice(0, 80)}{m.content.length > 80 ? '…' : ''}</div>;
+      default:
+        return null;
+    }
+  };
+
   return (
     <div style={panel} onPaste={onPaste}>
       <div style={titleBar}>
@@ -195,6 +414,15 @@ export function AgentChatPanel({ agentName, messages, dead, commands, files, mod
         >
           {PERMISSION_MODE_OPTIONS.map(o => <option key={o.value} value={o.value}>🛡 {o.label}</option>)}
         </select>
+        <select
+          style={modeSelect}
+          value={localEffort}
+          disabled={dead}
+          onChange={e => changeEffort(e.target.value)}
+          title={EFFORT_TOOLTIP}
+        >
+          {EFFORT_OPTIONS.map(o => <option key={o.value} value={o.value}>💭 {o.label}</option>)}
+        </select>
       </div>
 
       <div style={transcript} ref={scrollRef}>
@@ -202,9 +430,7 @@ export function AgentChatPanel({ agentName, messages, dead, commands, files, mod
           {messages.length === 0 && (
             <div style={{ opacity: 0.6, fontStyle: 'italic' }}>L'agent démarre…</div>
           )}
-          {messages.map((m, i) => (
-            <div key={i} style={bubbleStyle(m.role)} title={m.role === 'tool' ? m.tool?.input : undefined}>{lineText(m)}</div>
-          ))}
+          {messages.map((m, i) => renderMessage(m, i))}
         </div>
       </div>
 
