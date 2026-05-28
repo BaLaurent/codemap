@@ -8,6 +8,7 @@ import { useAgentRoster, RosterState } from '../hooks/useAgentRoster';
 import { permissionModeLabel } from './permission-modes';
 import { setAgentName, clearAgentName, hasCustomName } from '../utils/agent-names';
 import { useTty } from './TtyHost';
+import { cwdShort } from '../utils/path-display';
 
 export interface AgentFocusRequest {
   projectId?: string;
@@ -120,7 +121,7 @@ export function AgentRosterPanel({ onSelectAgent, onOpenChat, onRespond, onOpenT
   onOpenTty?: (ttyId: string) => void;
 }) {
   const { groups, clearAgents, stopAgent } = useAgentRoster();
-  const { ttySessions, spawnTty } = useTty();
+  const { ttySessions, spawnTty, closeTty } = useTty();
   const [collapsed, setCollapsed] = useState(() => loadBool(COLLAPSED_KEY));
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => loadSet(GROUPS_KEY));
   const [menu, setMenu] = useState<{ agentId: string; baseName: string; spawned: boolean; x: number; y: number } | null>(null);
@@ -277,13 +278,14 @@ export function AgentRosterPanel({ onSelectAgent, onOpenChat, onRespond, onOpenT
                       {tty.title}
                     </div>
                     <div style={{ fontSize: 11, color: '#8a93a6', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      {tty.cwd.split('/').slice(-2).join('/')}
+                      {cwdShort(tty.cwd)}
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: 4 }} onClick={e => e.stopPropagation()}>
                     {onOpenTty && (
                       <button style={actionBtn} title="Ouvrir le terminal" onClick={() => onOpenTty(tty.ttyId)}>💻</button>
                     )}
+                    <button style={{ ...actionBtn, color: '#f87171' }} title="Fermer le terminal" onClick={() => closeTty(tty.ttyId)}>✕</button>
                   </div>
                 </div>
               ))}

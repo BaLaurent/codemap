@@ -69,4 +69,13 @@ describe('TtyManager', () => {
     const { ttyManager } = await import('./tty-manager.js');
     expect(() => ttyManager.kill('ghost-id')).not.toThrow();
   });
+
+  it('exit naturel du shell supprime la session du manager', async () => {
+    const { ttyManager } = await import('./tty-manager.js');
+    const { ttyId } = ttyManager.spawn('/tmp/test');
+    expect(ttyManager.get(ttyId)).toBeDefined();
+    // Simuler la fin naturelle du processus
+    mockPty._listeners.exit.forEach(cb => cb({ exitCode: 0 }));
+    expect(ttyManager.get(ttyId)).toBeUndefined();
+  });
 });

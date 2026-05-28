@@ -15,7 +15,7 @@ interface TtyControl {
   ttySessions: TtySessionClient[];
   spawnTty: (projectId?: string) => Promise<void>;
   openTty: (ttyId: string) => void;
-  closeTty: () => void;
+  closeTty: (ttyId: string) => void;
 }
 
 const TtyContext = createContext<TtyControl | null>(null);
@@ -53,12 +53,11 @@ export function TtyProvider({ children }: { children: ReactNode }) {
 
   const openTty = useCallback((ttyId: string) => setOpenTtyId(ttyId), []);
 
-  const closeTty = useCallback(() => {
-    if (!openTtyId) return;
-    fetch(`${API_URL}/tty/${openTtyId}`, { method: 'DELETE' }).catch(() => { /* ignore */ });
-    setTtySessions(prev => prev.filter(s => s.ttyId !== openTtyId));
-    setOpenTtyId(null);
-  }, [openTtyId]);
+  const closeTty = useCallback((ttyId: string) => {
+    fetch(`${API_URL}/tty/${ttyId}`, { method: 'DELETE' }).catch(() => { /* ignore */ });
+    setTtySessions(prev => prev.filter(s => s.ttyId !== ttyId));
+    setOpenTtyId(prev => prev === ttyId ? null : prev);
+  }, []);
 
   const control = useMemo<TtyControl>(
     () => ({ openTtyId, ttySessions, spawnTty, openTty, closeTty }),
@@ -81,7 +80,7 @@ export function TtyProvider({ children }: { children: ReactNode }) {
             title={session.title}
             cwd={session.cwd}
             rightOffset={rightOffset}
-            onClose={closeTty}
+            onClose={() => closeTty(session.ttyId)}
           />
         </div>
       ))}

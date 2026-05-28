@@ -76,7 +76,7 @@ server.on('upgrade', (req, socket, head) => {
       if (typeof msg !== 'object' || msg === null) return;
       const m = msg as { type?: string; data?: string; cols?: number; rows?: number };
       if (m.type === 'input' && typeof m.data === 'string') session.pty.write(m.data);
-      else if (m.type === 'resize' && m.cols && m.rows) session.pty.resize(m.cols, m.rows);
+      else if (m.type === 'resize' && typeof m.cols === 'number' && typeof m.rows === 'number' && Number.isInteger(m.cols) && m.cols > 0 && m.cols < 1000 && Number.isInteger(m.rows) && m.rows > 0 && m.rows < 500) session.pty.resize(m.cols, m.rows);
     });
     ws.on('close', () => dataDisposable.dispose());
   });

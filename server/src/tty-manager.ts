@@ -32,6 +32,7 @@ class TtyManager {
     });
     const session: TtySession = { ttyId, pty: ptyProcess, shell, cwd, title, createdAt: Date.now() };
     this.sessions.set(ttyId, session);
+    ptyProcess.onExit(() => { this.sessions.delete(ttyId); });
     return session;
   }
 

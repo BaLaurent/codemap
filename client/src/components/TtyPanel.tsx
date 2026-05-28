@@ -3,6 +3,7 @@ import { Terminal } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import { WebLinksAddon } from 'xterm-addon-web-links';
 import 'xterm/css/xterm.css';
+import { cwdShort } from '../utils/path-display';
 
 const WS_URL = 'ws://localhost:5174';
 
@@ -36,7 +37,7 @@ interface TtyPanelProps {
 export function TtyPanel({ ttyId, title, cwd, rightOffset, onClose }: TtyPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const cwdShort = cwd.split('/').slice(-2).join('/');
+  const short = cwdShort(cwd);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -102,7 +103,7 @@ export function TtyPanel({ ttyId, title, cwd, rightOffset, onClose }: TtyPanelPr
       <div style={titleBar}>
         <span>💻 {title}</span>
         <span style={{ fontSize: 11, color: '#888', flex: 1, marginLeft: 8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {cwdShort}
+          {short}
         </span>
         <button style={iconBtn} onClick={onClose} title="Fermer le terminal">✕</button>
       </div>
