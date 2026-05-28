@@ -121,7 +121,7 @@ export function AgentRosterPanel({ onSelectAgent, onOpenChat, onRespond, onOpenT
   onOpenTty?: (ttyId: string) => void;
 }) {
   const { groups, clearAgents, stopAgent } = useAgentRoster();
-  const { ttySessions, spawnTty, closeTty } = useTty();
+  const { ttySessions, spawnTty, closeTty, openTtyId, openTty, hideTty } = useTty();
   const [collapsed, setCollapsed] = useState(() => loadBool(COLLAPSED_KEY));
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => loadSet(GROUPS_KEY));
   const [menu, setMenu] = useState<{ agentId: string; baseName: string; spawned: boolean; x: number; y: number } | null>(null);
@@ -282,8 +282,10 @@ export function AgentRosterPanel({ onSelectAgent, onOpenChat, onRespond, onOpenT
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: 4 }} onClick={e => e.stopPropagation()}>
-                    {onOpenTty && (
-                      <button style={actionBtn} title="Ouvrir le terminal" onClick={() => onOpenTty(tty.ttyId)}>💻</button>
+                    {openTtyId === tty.ttyId ? (
+                      <button style={actionBtn} title="Réduire le terminal" onClick={() => hideTty()}>─</button>
+                    ) : (
+                      <button style={actionBtn} title="Ouvrir le terminal" onClick={() => { openTty(tty.ttyId); onOpenTty?.(tty.ttyId); }}>💻</button>
                     )}
                     <button style={{ ...actionBtn, color: '#f87171' }} title="Fermer le terminal" onClick={() => closeTty(tty.ttyId)}>✕</button>
                   </div>
