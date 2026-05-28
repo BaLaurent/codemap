@@ -14,16 +14,15 @@ export interface TtySession extends TtySessionInfo {
   pty: IPty;
 }
 
-let counter = 0;
-
 class TtyManager {
   private sessions = new Map<string, TtySession>();
+  private counter = 0;
 
-  spawn(cwd: string): TtySessionInfo {
+  spawn(cwd: string): TtySession {
     const ttyId = randomUUID();
     const shell = process.env.SHELL ?? '/bin/bash';
-    counter++;
-    const title = `TTY ${counter}`;
+    this.counter++;
+    const title = `TTY ${this.counter}`;
     const ptyProcess = spawn(shell, [], {
       name: 'xterm-256color',
       cwd,
@@ -33,7 +32,7 @@ class TtyManager {
     });
     const session: TtySession = { ttyId, pty: ptyProcess, shell, cwd, title, createdAt: Date.now() };
     this.sessions.set(ttyId, session);
-    return { ttyId, shell, cwd, title, createdAt: session.createdAt };
+    return session;
   }
 
   get(ttyId: string): TtySession | undefined {
@@ -48,6 +47,7 @@ class TtyManager {
   }
 
   list(): TtySessionInfo[] {
+    // strips pty — safe for HTTP serialisation
     return [...this.sessions.values()].map(({ ttyId, shell, cwd, title, createdAt }) => ({
       ttyId, shell, cwd, title, createdAt,
     }));

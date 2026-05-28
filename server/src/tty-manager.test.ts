@@ -34,13 +34,14 @@ describe('TtyManager', () => {
     expect(info.ttyId).toMatch(/^[0-9a-f-]{36}$/);
     expect(info.cwd).toBe('/tmp/test');
     expect(info.title).toMatch(/^TTY \d+$/);
+    expect(info.shell).toMatch(/bash|zsh|sh/);
   });
 
   it('list() retourne les sessions actives', async () => {
     const { ttyManager } = await import('./tty-manager.js');
     ttyManager.spawn('/tmp/a');
     ttyManager.spawn('/tmp/b');
-    expect(ttyManager.list().length).toBeGreaterThanOrEqual(2);
+    expect(ttyManager.list().length).toBe(2);
   });
 
   it('get() retrouve la session par id', async () => {
