@@ -32,6 +32,11 @@ export interface RunnerCallbacks {
   onToolResult: (agentId: string, toolUseId: string, content: string, isError: boolean) => void;
   /** A thinking block (extended reasoning). Rendered as a collapsible 💭 bubble. */
   onThinking: (agentId: string, content: string) => void;
+  /** SDK emitted a `result` message — the current turn is fully consumed and the
+   *  SDK is now parked on its input stream waiting for the next user turn. Used
+   *  by the hotel to flip `isThinking` back off (the bash hooks miss this edge
+   *  for SDK in-process agents). */
+  onTurnEnd: (agentId: string) => void;
   onPermission: (agentId: string, req: PermissionRequest) => Promise<InteractionOutcome>;
   onError: (agentId: string, message: string) => void;
   onEnd: (agentId: string) => void;
@@ -111,7 +116,9 @@ export function outcomeToPermissionResult(outcome: InteractionOutcome, input: Re
 //   user.tool_result     → onToolResult (paired with its tool_use by id)
 // The user turn is where the SDK loops tool outputs back in; we only forward
 // tool_result blocks, never the original user text (already emitted by us via
-// sendMessage → broadcastChat as a 'user' line). 'result' (turn done) is a no-op.
+// sendMessage → broadcastChat as a 'user' line). 'result' signals turn end — we
+// forward it via onTurnEnd so the hotel can flip its "typing…" indicator off
+// (bash Pre/PostToolUse hooks don't fire after the last assistant text block).
 export function dispatchSdkMessage(message: unknown, agentId: string, cb: RunnerCallbacks): void {
   if (!message || typeof message !== 'object' || !('type' in message)) return;
   const m = message as { type: string };
@@ -138,6 +145,8 @@ export function dispatchSdkMessage(message: unknown, agentId: string, cb: Runner
         }
       }
     }
+  } else if (m.type === 'result') {
+    cb.onTurnEnd(agentId);
   }
 }
 

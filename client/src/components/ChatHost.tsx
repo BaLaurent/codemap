@@ -27,7 +27,7 @@ export function useChat(): ChatControl {
 }
 
 export function ChatProvider({ children }: { children: ReactNode }) {
-  const { chatHistoryRef, chatVersionRef, thinkingAgentsRef } = useAgentStream();
+  const { chatHistoryRef, chatVersionRef, thinkingAgentsRef, thinkingVersionRef } = useAgentStream();
 
   const [chatAgentId, setChatAgentId] = useState<string | null>(null);
   // "/" commands+skills and "@" files for the live session, plus the models it can
@@ -95,19 +95,28 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener(AGENT_NAMES_CHANGED, onRename);
   }, [chatAgentId]);
 
-  // Poll the version ref (refs don't re-render) only while a chat is open, so the
-  // panel refreshes on each new line without a permanent render loop.
+  // Poll the version refs (refs don't re-render) only while a chat is open, so the
+  // panel refreshes on each new line without a permanent render loop. Two refs
+  // are watched:
+  //   - chatVersionRef: new chat line / permission-request → panel transcript
+  //   - thinkingVersionRef: agent isThinking flipped → "typing…" indicator
+  // Same pattern HabboRoom uses (see HabboRoom.tsx ~L579-586).
   useEffect(() => {
     if (!chatAgentId) return;
     let raf = 0;
-    let last = chatVersionRef.current;
+    let lastChat = chatVersionRef.current;
+    let lastThinking = thinkingVersionRef.current;
     const loop = () => {
-      if (chatVersionRef.current !== last) { last = chatVersionRef.current; setChatTick(t => t + 1); }
+      if (chatVersionRef.current !== lastChat || thinkingVersionRef.current !== lastThinking) {
+        lastChat = chatVersionRef.current;
+        lastThinking = thinkingVersionRef.current;
+        setChatTick(t => t + 1);
+      }
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
-  }, [chatAgentId, chatVersionRef]);
+  }, [chatAgentId, chatVersionRef, thinkingVersionRef]);
 
   const sendChat = (agentId: string, content: string) => {
     fetch(`${API_URL}/agent/${agentId}/message`, {
@@ -173,6 +182,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             agentName={getAgentName(chatAgentId, agent?.displayName || 'Agent')}
             messages={history}
             dead={dead}
+            isThinking={agent?.isThinking}
             commands={chatCommands}
             files={chatFiles}
             models={chatModels}

@@ -619,6 +619,9 @@ app.post('/api/agent/spawn', (req, res) => {
   // Remember the spawn-form effort so the chat panel's selector reflects it
   // straight away; the runtime POST /effort updates this later.
   if (isEffortValue(effort)) state.effort = effort;
+  // Spawn with a first turn → the agent is busy immediately (same reason as
+  // POST /message). Idle spawn (no firstTurn) stays isThinking=false.
+  if (firstTurn) state.isThinking = true;
   refreshAgentCounts();
   wsManager.broadcast('thinking', getAgentStatesArray());
 
@@ -639,6 +642,16 @@ app.post('/api/agent/spawn', (req, res) => {
       onToolResult: (id, toolUseId, content, isError) =>
         broadcastChat(id, 'tool_result', content, undefined, { toolUseId, isError }),
       onThinking: (id, content) => broadcastChat(id, 'thinking', content),
+      // SDK `result` message → turn is fully consumed. Flip isThinking off here
+      // (the bash Pre/PostToolUse hooks miss the trailing edge for SDK in-process
+      // agents — they fire AROUND tool calls, not at end-of-turn).
+      onTurnEnd: (id) => {
+        const s = agentStates.get(id);
+        if (s && s.isThinking) {
+          s.isThinking = false;
+          wsManager.broadcast('thinking', getAgentStatesArray());
+        }
+      },
       onPermission: (id, request) => requestPermission(id, request),
       onError: (id, message) => {
         console.error(`[${new Date().toISOString()}] agent ${id} SDK session crashed: ${message}`);
@@ -732,6 +745,16 @@ app.post('/api/agent/:agentId/message', (req, res) => {
   }
   broadcastChat(agentId, 'user', content);
   const ok = runnerSendMessage(agentId, content);
+  // Mark the agent as busy as soon as the user submits — bash hooks only fire
+  // around tool calls, which is too late for the "typing…" indicator to show
+  // during the gap before the first assistant block. Mirror at onTurnEnd.
+  if (ok) {
+    const s = agentStates.get(agentId);
+    if (s && !s.isThinking) {
+      s.isThinking = true;
+      wsManager.broadcast('thinking', getAgentStatesArray());
+    }
+  }
   res.status(200).json({ ok });
 });
 

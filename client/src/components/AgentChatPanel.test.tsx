@@ -165,6 +165,27 @@ describe('AgentChatPanel rendering', () => {
     expect(onEffortChange).toHaveBeenCalledWith('off');
   });
 
+  it('shows the "typing…" indicator when the agent is thinking with an empty transcript', () => {
+    const { container } = render(<AgentChatPanel {...baseProps} messages={[]} isThinking={true} />);
+    // Indicator is identified by its aria-label; avoids matching unrelated UI text.
+    expect(container.querySelector('[aria-label="L\'agent réfléchit"]')).not.toBeNull();
+    // The "L'agent démarre…" placeholder must yield to the indicator (otherwise
+    // we'd show two competing "waiting" messages).
+    expect(container.textContent).not.toContain("L'agent démarre");
+  });
+
+  it('hides the "typing…" indicator when the session is dead, even if isThinking is true', () => {
+    // A killed/crashed agent should never appear to still be typing — that
+    // would lie to the user about whether new content is coming.
+    const { container } = render(<AgentChatPanel {...baseProps} messages={[]} isThinking={true} dead={true} />);
+    expect(container.querySelector('[aria-label="L\'agent réfléchit"]')).toBeNull();
+  });
+
+  it('hides the "typing…" indicator when isThinking is false', () => {
+    const { container } = render(<AgentChatPanel {...baseProps} messages={[msg({ role: 'assistant', content: 'fini' })]} isThinking={false} />);
+    expect(container.querySelector('[aria-label="L\'agent réfléchit"]')).toBeNull();
+  });
+
   it('renders the user turn as plain text with newlines preserved', () => {
     const messages: ChatMessage[] = [msg({ role: 'user', content: 'ligne 1\nligne 2' })];
     render(<AgentChatPanel {...baseProps} messages={messages} />);

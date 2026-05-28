@@ -11,6 +11,7 @@ function makeCallbacks(): RunnerCallbacks {
     onToolUse: vi.fn(),
     onToolResult: vi.fn(),
     onThinking: vi.fn(),
+    onTurnEnd: vi.fn(),
     onPermission: vi.fn(),
     onError: vi.fn(),
     onEnd: vi.fn(),
@@ -139,14 +140,24 @@ describe('dispatchSdkMessage', () => {
     expect(cb.onToolResult).not.toHaveBeenCalled();
   });
 
-  it('handles result/system message types as no-ops (turn-done markers, etc.)', () => {
+  it("forwards `result` (SDK turn-done marker) via onTurnEnd, but doesn't touch the block callbacks", () => {
     const cb = makeCallbacks();
     dispatchSdkMessage({ type: 'result' }, agentId, cb);
+    expect(cb.onTurnEnd).toHaveBeenCalledWith(agentId);
+    expect(cb.onChat).not.toHaveBeenCalled();
+    expect(cb.onToolUse).not.toHaveBeenCalled();
+    expect(cb.onToolResult).not.toHaveBeenCalled();
+    expect(cb.onThinking).not.toHaveBeenCalled();
+  });
+
+  it('handles `system` message type as a no-op (init/session-replay markers)', () => {
+    const cb = makeCallbacks();
     dispatchSdkMessage({ type: 'system' }, agentId, cb);
     expect(cb.onChat).not.toHaveBeenCalled();
     expect(cb.onToolUse).not.toHaveBeenCalled();
     expect(cb.onToolResult).not.toHaveBeenCalled();
     expect(cb.onThinking).not.toHaveBeenCalled();
+    expect(cb.onTurnEnd).not.toHaveBeenCalled();
   });
 
   it('gracefully ignores malformed input (null, no type, no content)', () => {

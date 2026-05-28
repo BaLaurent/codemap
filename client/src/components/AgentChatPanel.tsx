@@ -144,6 +144,36 @@ const thinkingDetails: CSSProperties = {
 
 const orphanResult: CSSProperties = { ...systemBubble, opacity: 0.5, fontSize: 11 };
 
+// "typing…" placeholder shown at the tail of the transcript while the agent is
+// thinking but hasn't emitted a block yet (or between blocks). NOT a ChatMessage:
+// it's a transient React node so we don't pollute chatHistoryRef / the server
+// transcript with markers that have no use after the turn ends.
+const typingWrap: CSSProperties = {
+  ...bubbleBase, alignSelf: 'flex-start',
+  border: `1px dashed rgba(74,59,26,0.4)`, background: '#EFEAD8',
+  padding: '4px 10px', fontSize: 12, fontStyle: 'italic', opacity: 0.85,
+  display: 'inline-flex', alignItems: 'baseline', gap: 6,
+};
+
+const typingDot: CSSProperties = {
+  display: 'inline-block', width: 5, height: 5, borderRadius: '50%',
+  background: C.ink, animation: 'hf-typing-pulse 1.1s ease-in-out infinite',
+};
+
+// Inline keyframes — the codebase has no CSS file and no styled-components.
+// Rendered once inside the panel root so the rule is registered before any
+// indicator mounts; React de-dupes identical <style> nodes across re-renders.
+function TypingIndicator() {
+  return (
+    <div style={typingWrap} aria-live="polite" aria-label="L'agent réfléchit">
+      <span>💭 typing</span>
+      <span style={typingDot} />
+      <span style={{ ...typingDot, animationDelay: '0.15s' }} />
+      <span style={{ ...typingDot, animationDelay: '0.3s' }} />
+    </div>
+  );
+}
+
 // Style hooks for react-markdown: keep the pixel-art skin, avoid leaking the
 // default white-on-blue link colour, and let code fences sit in a small framed
 // box. `pre`/`code` styling is matched to ToolCall's expanded content for visual
@@ -254,10 +284,11 @@ function ThinkingBubble({ content }: { content: string }) {
   );
 }
 
-export function AgentChatPanel({ agentName, messages, dead, commands, files, models, model, mode, effort, onModelChange, onModeChange, onEffortChange, onSend, onStop, onClose, onAttach }: {
+export function AgentChatPanel({ agentName, messages, dead, isThinking, commands, files, models, model, mode, effort, onModelChange, onModeChange, onEffortChange, onSend, onStop, onClose, onAttach }: {
   agentName: string;
   messages: ChatMessage[];
   dead?: boolean;  // session ended/crashed → input is disabled
+  isThinking?: boolean;  // agent currently producing a turn → render "typing…" tail
   commands: SlashCommand[];  // "/" completion (commands + skills) for the live session
   files: string[];           // "@" completion (project-relative paths)
   models: ModelOption[];     // selectable models for the live session
@@ -311,9 +342,12 @@ export function AgentChatPanel({ agentName, messages, dead, commands, files, mod
     return { resultsByToolUseId: results, toolUseIdsSeen: seen };
   }, [messages]);
 
+  // Auto-scroll also reacts to `isThinking` flipping on: the "typing…" bubble
+  // is appended to the transcript and would otherwise stay below the fold if
+  // the user is parked mid-scroll when the agent starts a new turn.
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-  }, [messages.length]);
+  }, [messages.length, isThinking]);
 
   const send = () => {
     if (dead) return;
@@ -387,6 +421,10 @@ export function AgentChatPanel({ agentName, messages, dead, commands, files, mod
 
   return (
     <div style={panel} onPaste={onPaste}>
+      {/* Keyframes for the "typing…" dots. Inline because the project has no
+          CSS file. Only one AgentChatPanel mounts at a time, so the rule lives
+          and dies with the panel. */}
+      <style>{`@keyframes hf-typing-pulse { 0%, 80%, 100% { opacity: 0.25; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-2px); } }`}</style>
       <div style={titleBar}>
         <span>💬 {agentName}</span>
         <span>
@@ -427,10 +465,11 @@ export function AgentChatPanel({ agentName, messages, dead, commands, files, mod
 
       <div style={transcript} ref={scrollRef}>
         <div style={{ display: 'flex', flexDirection: 'column' }}>
-          {messages.length === 0 && (
+          {messages.length === 0 && !isThinking && (
             <div style={{ opacity: 0.6, fontStyle: 'italic' }}>L'agent démarre…</div>
           )}
           {messages.map((m, i) => renderMessage(m, i))}
+          {isThinking && !dead && <TypingIndicator />}
         </div>
       </div>
 
