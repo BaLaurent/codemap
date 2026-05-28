@@ -1600,7 +1600,7 @@ export function HabboRoom({ projectId, focusRequest, actionRequest }: { projectI
       )}
 
       {/* Spawn-an-agent control (bottom-left) */}
-      <div style={{ position: 'absolute', left: 16, bottom: 16, zIndex: 25, fontFamily: 'monospace', display: 'flex', gap: 8 }}>
+      <div style={{ position: 'absolute', left: 16, bottom: 16, zIndex: 25, fontFamily: 'monospace', display: 'flex', gap: 8, alignItems: 'flex-end' }}>
         {spawnOpen ? (
           <SpawnPanel
             models={spawnModels}

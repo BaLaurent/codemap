@@ -157,7 +157,10 @@ export function useAgentRoster(): AgentRoster {
       .catch(() => {});
   }, []);
 
-  // Kill a single spawned agent (ends its SDK session + removes its character).
+  // Drop an agent from the roster + play the death animation. For hotel-spawned
+  // agents this also ends the SDK session; for externals (Claude Code/Cursor
+  // tracked via hooks) the server-side stopAgent is a no-op and only the avatar
+  // is cleared — the real process keeps running.
   // Drop it from the list optimistically; the next poll reconciles if needed.
   const stopAgent = useCallback((agentId: string) => {
     fetch(`${API_URL}/agent/${agentId}/stop`, { method: 'POST' })

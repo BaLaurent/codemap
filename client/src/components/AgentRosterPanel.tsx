@@ -309,17 +309,18 @@ export function AgentRosterPanel({ onSelectAgent, onOpenChat, onRespond, onOpenT
               onClick={() => { clearAgentName(menu.agentId); setMenu(null); }}
             >Réinitialiser le nom</div>
           )}
-          {menu.spawned && (
-            <div
-              style={{ ...menuItem, borderTop: '1px solid rgba(255,255,255,0.1)', color: '#f87171' }}
-              onClick={() => {
-                if (window.confirm("Arrêter cet agent ? Sa session sera fermée et son personnage retiré.")) {
-                  stopAgent(menu.agentId);
-                }
-                setMenu(null);
-              }}
-            >Arrêter l'agent</div>
-          )}
+          <div
+            style={{ ...menuItem, borderTop: '1px solid rgba(255,255,255,0.1)', color: '#f87171' }}
+            onClick={() => {
+              const prompt = menu.spawned
+                ? "Arrêter cet agent ? Sa session sera fermée et son personnage retiré."
+                : "Retirer cet agent de l'hôtel ? Son avatar disparaît mais son processus continue de tourner.";
+              if (window.confirm(prompt)) {
+                stopAgent(menu.agentId);
+              }
+              setMenu(null);
+            }}
+          >{menu.spawned ? "Arrêter l'agent" : "Retirer de l'hôtel"}</div>
         </div>
       )}
     </>
