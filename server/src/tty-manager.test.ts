@@ -70,6 +70,22 @@ describe('TtyManager', () => {
     expect(() => ttyManager.kill('ghost-id')).not.toThrow();
   });
 
+  it('outputBuffer accumule les données PTY dès le spawn', async () => {
+    const { ttyManager } = await import('./tty-manager.js');
+    const session = ttyManager.spawn('/tmp/test');
+    expect(session.outputBuffer).toBe('');
+    mockPty._listeners.data.forEach(cb => cb('$ prompt\r\n'));
+    expect(session.outputBuffer).toBe('$ prompt\r\n');
+  });
+
+  it('outputBuffer est tronqué au-delà de la limite', async () => {
+    const { ttyManager } = await import('./tty-manager.js');
+    const session = ttyManager.spawn('/tmp/test');
+    const big = 'x'.repeat(65 * 1024);
+    mockPty._listeners.data.forEach(cb => cb(big));
+    expect(session.outputBuffer.length).toBeLessThanOrEqual(64 * 1024);
+  });
+
   it('exit naturel du shell supprime la session du manager', async () => {
     const { ttyManager } = await import('./tty-manager.js');
     const { ttyId } = ttyManager.spawn('/tmp/test');

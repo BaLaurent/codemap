@@ -2,6 +2,8 @@ import { spawn } from 'node-pty';
 import type { IPty } from 'node-pty';
 import { randomUUID } from 'crypto';
 
+const OUTPUT_BUFFER_LIMIT = 64 * 1024; // 64 KB max replay buffer
+
 export interface TtySessionInfo {
   ttyId: string;
   shell: string;
@@ -12,6 +14,7 @@ export interface TtySessionInfo {
 
 export interface TtySession extends TtySessionInfo {
   pty: IPty;
+  outputBuffer: string;
 }
 
 class TtyManager {
@@ -30,8 +33,15 @@ class TtyManager {
       cols: 80,
       rows: 24,
     });
-    const session: TtySession = { ttyId, pty: ptyProcess, shell, cwd, title, createdAt: Date.now() };
+    const session: TtySession = { ttyId, pty: ptyProcess, shell, cwd, title, createdAt: Date.now(), outputBuffer: '' };
     this.sessions.set(ttyId, session);
+    // Buffer output so a WS that connects late can replay it
+    ptyProcess.onData((data: string) => {
+      session.outputBuffer += data;
+      if (session.outputBuffer.length > OUTPUT_BUFFER_LIMIT) {
+        session.outputBuffer = session.outputBuffer.slice(-OUTPUT_BUFFER_LIMIT);
+      }
+    });
     ptyProcess.onExit(() => { this.sessions.delete(ttyId); });
     return session;
   }
@@ -48,7 +58,6 @@ class TtyManager {
   }
 
   list(): TtySessionInfo[] {
-    // strips pty — safe for HTTP serialisation
     return [...this.sessions.values()].map(({ ttyId, shell, cwd, title, createdAt }) => ({
       ttyId, shell, cwd, title, createdAt,
     }));

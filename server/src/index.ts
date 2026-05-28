@@ -61,6 +61,8 @@ server.on('upgrade', (req, socket, head) => {
       ws.close(4004, 'TTY not found');
       return;
     }
+    // Replay buffered output so the client doesn't miss the initial shell prompt
+    if (session.outputBuffer) ws.send(session.outputBuffer);
     const dataDisposable = session.pty.onData((data: string) => {
       if (ws.readyState === WebSocket.OPEN) ws.send(data);
     });
