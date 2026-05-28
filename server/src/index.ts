@@ -55,7 +55,7 @@ server.on('upgrade', (req, socket, head) => {
   const url = req.url ?? '';
   if (!url.startsWith('/ws/tty/')) return;
   ttyWss.handleUpgrade(req, socket, head, (ws) => {
-    const ttyId = url.slice('/ws/tty/'.length);
+    const ttyId = url.slice('/ws/tty/'.length).split('?')[0];
     const session = ttyManager.get(ttyId);
     if (!session) {
       ws.close(4004, 'TTY not found');
