@@ -38,6 +38,9 @@ npm-debug.log*
 # Playwright screenshots (development)
 .playwright-mcp/
 
+#superpowers
+.superpowers/
+
 # Fallow analysis cache
 .fallow/
 

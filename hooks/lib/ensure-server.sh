@@ -17,7 +17,12 @@ ensure_codemap_server() {
     (
       flock -n 9 || exit 0   # another hook is already starting it
       if ! /usr/bin/curl -s --connect-timeout 1 --max-time 1 "$health" >/dev/null 2>&1; then
-        nohup npm --prefix "$codemap_root" run dev:server >/tmp/codemap-server.log 2>&1 &
+        # 9>&- : close the lock fd in the detached child. A backgrounded process
+        # inherits the parent's open fds; without this the npm/tsx-watch tree
+        # keeps fd 9 (the flock) open for its whole life, so the lock is never
+        # released after this subshell exits — and if the server child later
+        # dies, every future hook's `flock -n 9` fails and recovery deadlocks.
+        nohup npm --prefix "$codemap_root" run dev:server >/tmp/codemap-server.log 2>&1 9>&- &
         for _ in 1 2 3 4 5 6 7 8 9 10; do
           sleep 0.5
           /usr/bin/curl -s --connect-timeout 1 --max-time 1 "$health" >/dev/null 2>&1 && break
@@ -34,7 +39,8 @@ ensure_codemap_server() {
     (
       flock -n 8 || exit 0
       if ! /usr/bin/curl -s --connect-timeout 1 --max-time 1 "$client" >/dev/null 2>&1; then
-        nohup npm --prefix "$codemap_root" run dev:client >/tmp/codemap-client.log 2>&1 &
+        # 8>&- : same flock-fd leak guard as the server block above.
+        nohup npm --prefix "$codemap_root" run dev:client >/tmp/codemap-client.log 2>&1 8>&- &
       fi
     ) 8>"$client_lock"
   fi
