@@ -31,6 +31,7 @@ export interface ActionRequest extends AgentActionRequest {
 }
 
 const COLLAPSED_KEY = 'codemap-roster-collapsed';
+const TTY_COLLAPSED_KEY = 'codemap-tty-collapsed';
 const GROUPS_KEY = 'codemap-roster-groups-collapsed';
 
 const STATE_META: Record<RosterState, { color: string; label: string }> = {
@@ -71,7 +72,7 @@ const panel: CSSProperties = {
   backgroundColor: 'rgba(17, 24, 39, 0.9)', borderRadius: 12,
   color: '#e5e7eb', fontSize: 13,
   border: '1px solid rgba(255, 255, 255, 0.1)', backdropFilter: 'blur(8px)',
-  maxHeight: '60vh', display: 'flex', flexDirection: 'column',
+  maxHeight: '60vh', display: 'flex', flexDirection: 'column', overflow: 'hidden',
 };
 
 const header: CSSProperties = {
@@ -123,6 +124,7 @@ export function AgentRosterPanel({ onSelectAgent, onOpenChat, onRespond, onOpenT
   const { groups, clearAgents, stopAgent } = useAgentRoster();
   const { ttySessions, spawnTty, closeTty, openTtyId, openTty, hideTty } = useTty();
   const [collapsed, setCollapsed] = useState(() => loadBool(COLLAPSED_KEY));
+  const [ttyCollapsed, setTtyCollapsed] = useState(() => loadBool(TTY_COLLAPSED_KEY));
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => loadSet(GROUPS_KEY));
   const [menu, setMenu] = useState<{ agentId: string; baseName: string; spawned: boolean; x: number; y: number } | null>(null);
   const [editing, setEditing] = useState<{ agentId: string; value: string } | null>(null);
@@ -133,6 +135,12 @@ export function AgentRosterPanel({ onSelectAgent, onOpenChat, onRespond, onOpenT
     const next = !collapsed;
     setCollapsed(next);
     try { localStorage.setItem(COLLAPSED_KEY, next ? 'true' : 'false'); } catch { /* ignore */ }
+  };
+
+  const toggleTty = () => {
+    const next = !ttyCollapsed;
+    setTtyCollapsed(next);
+    try { localStorage.setItem(TTY_COLLAPSED_KEY, next ? 'true' : 'false'); } catch { /* ignore */ }
   };
 
   const toggleGroup = (projectId: string | null) => {
@@ -177,8 +185,9 @@ export function AgentRosterPanel({ onSelectAgent, onOpenChat, onRespond, onOpenT
           </div>
         </div>
 
-        {!collapsed && (
-          <div style={{ overflowY: 'auto' }}>
+        <div style={{ overflowY: 'auto', flex: '1 1 auto', minHeight: 0 }}>
+          {!collapsed && (
+            <>
             {groups.length === 0 && (
               <div style={{ padding: '10px 14px', color: '#8a93a6' }}>Aucun agent actif.</div>
             )}
@@ -253,17 +262,28 @@ export function AgentRosterPanel({ onSelectAgent, onOpenChat, onRespond, onOpenT
                 </div>
               );
             })}
+            </>
+          )}
 
-            {/* Section Terminaux */}
-            <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', marginTop: 4, paddingTop: 4 }}>
-              <div style={{ ...groupHeader, justifyContent: 'space-between' }}>
-                <span>💻 Terminaux ({ttySessions.length})</span>
+          {/* Section Terminaux — dropdown séparé, replié indépendamment des agents */}
+          <div style={{ borderTop: '1px solid rgba(255,255,255,0.12)' }}>
+            <div
+              style={header}
+              onClick={toggleTty}
+              title={ttyCollapsed ? 'Déplier' : 'Replier'}
+            >
+              <span>Terminaux ({ttySessions.length})</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <button
-                  style={{ ...clearBtn, fontSize: 10 }}
+                  style={clearBtn}
                   title="Nouveau terminal"
                   onClick={e => { e.stopPropagation(); spawnTty(); }}
                 >+</button>
+                <span>{ttyCollapsed ? '▸' : '▾'}</span>
               </div>
+            </div>
+            {!ttyCollapsed && (
+              <>
               {ttySessions.length === 0 && (
                 <div style={{ padding: '6px 14px', color: '#8a93a6', fontSize: 12 }}>Aucun terminal.</div>
               )}
@@ -291,9 +311,10 @@ export function AgentRosterPanel({ onSelectAgent, onOpenChat, onRespond, onOpenT
                   </div>
                 </div>
               ))}
-            </div>
+              </>
+            )}
           </div>
-        )}
+        </div>
       </div>
 
       {menu && (
