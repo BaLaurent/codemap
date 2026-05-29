@@ -26,6 +26,17 @@ const titleInput: CSSProperties = {
   fontFamily: 'inherit', padding: 0, width: '8em',
 };
 
+const menuStyle: CSSProperties = {
+  position: 'fixed', zIndex: 30, minWidth: 160,
+  backgroundColor: 'rgba(17, 24, 39, 0.98)', borderRadius: 8,
+  border: '1px solid rgba(255,255,255,0.15)', boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
+  overflow: 'hidden', fontSize: 13, fontFamily: 'sans-serif', fontWeight: 400,
+};
+
+const menuItem: CSSProperties = {
+  padding: '8px 14px', cursor: 'pointer', color: '#e5e7eb',
+};
+
 interface TtyPanelProps {
   ttyId: string;
   title: string;
@@ -52,6 +63,24 @@ export function TtyPanel({ ttyId, title, cwd, rightOffset, active, onClose, onMi
 
   // Sync local edit buffer when parent renames from outside (e.g., on mount)
   useEffect(() => { setEditValue(title); }, [title]);
+
+  // ── Menu contextuel (clic droit), même UX que le roster d'agents ─────────────
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    if (!menu) return;
+    const close = () => setMenu(null);
+    const onKey = (e: globalThis.KeyboardEvent) => { if (e.key === 'Escape') setMenu(null); };
+    window.addEventListener('click', close);
+    window.addEventListener('keydown', onKey);
+    return () => { window.removeEventListener('click', close); window.removeEventListener('keydown', onKey); };
+  }, [menu]);
+
+  const startRename = useCallback(() => {
+    setEditing(true);
+    setEditValue(title);
+    setMenu(null);
+  }, [title]);
 
   const commitRename = useCallback(() => {
     setEditing(false);
@@ -216,7 +245,10 @@ export function TtyPanel({ ttyId, title, cwd, rightOffset, active, onClose, onMi
         }}
       />
 
-      <div style={titleBarStyle}>
+      <div
+        style={titleBarStyle}
+        onContextMenu={e => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY }); }}
+      >
         <span style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
           <span>💻</span>
           {editing ? (
@@ -230,8 +262,8 @@ export function TtyPanel({ ttyId, title, cwd, rightOffset, active, onClose, onMi
             />
           ) : (
             <span
-              onDoubleClick={() => { setEditing(true); setEditValue(title); }}
-              title="Double-clic pour renommer"
+              onDoubleClick={startRename}
+              title="Double-clic ou clic droit pour renommer"
               style={{ cursor: 'text' }}
             >
               {title}
@@ -251,6 +283,16 @@ export function TtyPanel({ ttyId, title, cwd, rightOffset, active, onClose, onMi
       </div>
 
       <div ref={containerRef} style={{ flex: 1, overflow: 'hidden', padding: 4 }} />
+
+      {menu && (
+        <div style={{ ...menuStyle, left: menu.x, top: menu.y }} onClick={e => e.stopPropagation()}>
+          <div
+            style={menuItem}
+            onMouseDown={e => e.preventDefault()}
+            onClick={startRename}
+          >Renommer</div>
+        </div>
+      )}
     </div>
   );
 }
