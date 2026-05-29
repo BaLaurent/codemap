@@ -17,18 +17,26 @@ export class ActivityStore {
 
   constructor(projectRoot: string) {
     this.projectRoot = projectRoot;
-    // Add project root as the central node
-    this.nodes.set(projectRoot, {
-      id: projectRoot,
-      name: path.basename(projectRoot),
+    // Build the initial tree (root node + full directory scan).
+    this.seedTree();
+    // Start watching for filesystem changes
+    this.startWatching();
+  }
+
+  // Reset the node map to a freshly-scanned tree: the central root node plus a
+  // full directory scan. Used by the constructor and by clear() — NOT paired
+  // with startWatching(), whose watcher stays live for the store's lifetime
+  // (re-invoking it would spawn a duplicate watcher and double every event).
+  private seedTree(): void {
+    this.nodes.clear();
+    this.nodes.set(this.projectRoot, {
+      id: this.projectRoot,
+      name: path.basename(this.projectRoot),
       isFolder: true,
       depth: -1, // Root is at depth -1
       activityCount: { reads: 0, writes: 0, searches: 0 }
     });
-    // Scan directory on startup
-    this.scanDirectory(projectRoot);
-    // Start watching for filesystem changes
-    this.startWatching();
+    this.scanDirectory(this.projectRoot);
   }
 
   // Set callback for when graph changes (file created/deleted)
@@ -254,16 +262,12 @@ export class ActivityStore {
     return { nodes, links };
   }
 
+  // Reset the heatmap: drop all activity state and re-scan the directory so the
+  // full on-disk tree returns with zeroed counts. Re-scanning is essential —
+  // without it the tree would only rebuild file-by-file from later activity
+  // events (the watcher uses ignoreInitial), leaving the building near-empty.
   clear(): void {
-    this.nodes.clear();
-    // Re-add the root node
-    this.nodes.set(this.projectRoot, {
-      id: this.projectRoot,
-      name: path.basename(this.projectRoot),
-      isFolder: true,
-      depth: -1,
-      activityCount: { reads: 0, writes: 0, searches: 0 }
-    });
+    this.seedTree();
   }
 
   /**

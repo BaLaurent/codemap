@@ -481,6 +481,40 @@ describe('ActivityStore: IGNORED_DIRS filtering (real class)', () => {
     expect(ids).not.toContain(path.join(projectRoot, 'node_modules'));
   });
 
+  it('REGRESSION: clear() re-scans the directory so the full tree returns (not just agent-touched files)', () => {
+    const projectRoot = makeTmpDir('proj-');
+    fs.mkdirSync(path.join(projectRoot, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(projectRoot, 'src', 'app.ts'), 'export const x = 1;');
+    fs.writeFileSync(path.join(projectRoot, 'README.md'), '# hi');
+
+    store = new ActivityStore(projectRoot);
+
+    // Touch one file so it carries activity state we expect clear() to reset.
+    store.addActivity({
+      type: 'read-end',
+      filePath: path.join(projectRoot, 'src', 'app.ts'),
+      timestamp: Date.now()
+    });
+    expect(
+      store.getGraphData().nodes.find(n => n.id === path.join(projectRoot, 'src', 'app.ts'))!
+        .activityCount.reads
+    ).toBe(1);
+
+    store.clear();
+
+    // The whole on-disk tree must be present again — not only the touched file.
+    const ids = store.getGraphData().nodes.map(n => n.id);
+    expect(ids).toContain(path.join(projectRoot, 'src'));
+    expect(ids).toContain(path.join(projectRoot, 'src', 'app.ts'));
+    expect(ids).toContain(path.join(projectRoot, 'README.md'));
+
+    // clear() is a heatmap reset: re-scanned nodes start with zeroed counts.
+    expect(
+      store.getGraphData().nodes.find(n => n.id === path.join(projectRoot, 'src', 'app.ts'))!
+        .activityCount.reads
+    ).toBe(0);
+  });
+
   it('handleFileAdd-equivalent path under an ignored dir is excluded; addActivity ignores it', () => {
     const projectRoot = makeTmpDir('proj-');
     fs.mkdirSync(path.join(projectRoot, 'dist'), { recursive: true });
