@@ -3,45 +3,100 @@
 # running, launching whichever is down, detached. Each is guarded by a port
 # check + its own flock so only one hook wins the cold-start race and an
 # already-running instance is never double-started. Best-effort: never blocks.
+#
+# Crash-loop guard: `tsx watch` does NOT restart its child after a crash (it
+# idles), so recovery comes from THIS script re-spawning on the next hook event.
+# But every hook event firing a fresh spawn while a service crash-loops once
+# piled up ~46 detached supervisors fighting over the port. So each spawn is
+# rate-limited by an exponential backoff persisted to a state file and consulted
+# UNDER the flock — the only way independent, short-lived hook processes can
+# agree to space their retries instead of each starting its own.
+#
+# Note: the backoff caps the spawn *rate*, not the lifetime *total* — a service
+# that crash-loops forever still leaks ~1 supervisor/minute at the 60s ceiling.
+# Reaping dead supervisors is a separate concern, deliberately not done here.
+
+# Spawn one detached service behind a port check, a flock, and an exponential
+# backoff. Args:
+#   $1 name (for logs)   $2 health URL          $3 lock file path
+#   $4 service log file   $5 max wait half-secs   $6.. spawn command
+_ensure_service() {
+  local name="$1" health="$2" lock="$3" log="$4" tries="$5"
+  shift 5
+  local backoff="${lock%.lock}.backoff"
+
+  # Fast path: already up. Clear the failure counter so a LATER crash retries
+  # immediately instead of inheriting a stale backoff window.
+  if /usr/bin/curl -s --connect-timeout 1 --max-time 1 "$health" >/dev/null 2>&1; then
+    rm -f "$backoff"
+    return 0
+  fi
+
+  (
+    flock -n 9 || exit 0   # another hook is already mid cold-start
+    # Re-check under the lock — it may have come up while we blocked.
+    if /usr/bin/curl -s --connect-timeout 1 --max-time 1 "$health" >/dev/null 2>&1; then
+      rm -f "$backoff"
+      exit 0
+    fi
+
+    # State file holds "<consecutive-failures> <last-attempt-epoch>".
+    local now failures=0 last=0 delay=0
+    now=$(date +%s)
+    if [ -r "$backoff" ]; then
+      read -r failures last < "$backoff" 2>/dev/null || true
+      case "$failures" in ''|*[!0-9]*) failures=0;; esac
+      case "$last"     in ''|*[!0-9]*) last=0;; esac
+    fi
+
+    # Required gap since the last attempt: 2^failures, capped at 60s (0 on the
+    # first try). `failures` is stored capped at 6, so `1 << failures` never
+    # exceeds 64 and can never overflow bash's signed 64-bit shift (which would
+    # wrap to a negative/tiny delay and silently re-open the spawn floodgate).
+    if [ "$failures" -gt 0 ]; then
+      delay=$(( 1 << failures ))
+      [ "$delay" -gt 60 ] && delay=60
+    fi
+    if [ $(( now - last )) -lt "$delay" ]; then
+      exit 0   # still inside the backoff window from a recent failed attempt
+    fi
+
+    # Record THIS attempt before spawning so concurrent/next hooks honour it.
+    echo "$(( failures + 1 > 6 ? 6 : failures + 1 )) $now" > "$backoff"
+
+    # 9>&- : close the inherited flock fd in the detached child. Otherwise the
+    # npm/tsx-watch tree keeps fd 9 open for its whole life, the lock is never
+    # released after this subshell exits, and every future `flock -n 9` fails —
+    # recovery deadlocks (the bug fixed in commit 46ad99e).
+    "$@" >"$log" 2>&1 9>&- &
+
+    # Wait briefly; on success clear the backoff, else leave it bumped so the
+    # next attempt waits longer. Breaks early, so a healthy start costs ~one
+    # check rather than the whole window.
+    local i
+    for (( i = 0; i < tries; i++ )); do
+      sleep 0.5
+      if /usr/bin/curl -s --connect-timeout 1 --max-time 1 "$health" >/dev/null 2>&1; then
+        rm -f "$backoff"
+        break
+      fi
+    done
+  ) 9>"$lock"
+}
 
 ensure_codemap_server() {
   local codemap_root="$1"   # absolute path to the codemap repo (contains package.json)
-  local health="http://localhost:5174/api/health"
-  local client="http://localhost:5173/"
-  local server_lock="/tmp/codemap-server.lock"
-  local client_lock="/tmp/codemap-client.lock"
 
-  # Server (:5174) — required to capture agent/activity events. Wait briefly for
-  # it to come up since the events that follow this hook need it.
-  if ! /usr/bin/curl -s --connect-timeout 1 --max-time 1 "$health" >/dev/null 2>&1; then
-    (
-      flock -n 9 || exit 0   # another hook is already starting it
-      if ! /usr/bin/curl -s --connect-timeout 1 --max-time 1 "$health" >/dev/null 2>&1; then
-        # 9>&- : close the lock fd in the detached child. A backgrounded process
-        # inherits the parent's open fds; without this the npm/tsx-watch tree
-        # keeps fd 9 (the flock) open for its whole life, so the lock is never
-        # released after this subshell exits — and if the server child later
-        # dies, every future hook's `flock -n 9` fails and recovery deadlocks.
-        nohup npm --prefix "$codemap_root" run dev:server >/tmp/codemap-server.log 2>&1 9>&- &
-        for _ in 1 2 3 4 5 6 7 8 9 10; do
-          sleep 0.5
-          /usr/bin/curl -s --connect-timeout 1 --max-time 1 "$health" >/dev/null 2>&1 && break
-        done
-      fi
-    ) 9>"$server_lock"
-  fi
+  # Server (:5174) — required to capture agent/activity events, so wait a few
+  # seconds for it to come up since the events that follow this hook need it.
+  _ensure_service "CodeMap server" "http://localhost:5174/api/health" \
+    "/tmp/codemap-server.lock" "/tmp/codemap-server.log" 10 \
+    nohup npm --prefix "$codemap_root" run dev:server
 
-  # Client / Vite (:5173) — the visualisation itself; a running server with no
-  # client is useless to a human. Started separately and guarded by its own port
-  # check + distinct flock so a client already up (e.g. a manual `npm run dev`)
-  # is never double-started. No wait loop: nothing downstream depends on it.
-  if ! /usr/bin/curl -s --connect-timeout 1 --max-time 1 "$client" >/dev/null 2>&1; then
-    (
-      flock -n 8 || exit 0
-      if ! /usr/bin/curl -s --connect-timeout 1 --max-time 1 "$client" >/dev/null 2>&1; then
-        # 8>&- : same flock-fd leak guard as the server block above.
-        nohup npm --prefix "$codemap_root" run dev:client >/tmp/codemap-client.log 2>&1 8>&- &
-      fi
-    ) 8>"$client_lock"
-  fi
+  # Client / Vite (:5173) — the visualisation itself. Nothing downstream depends
+  # on it, so its wait is short (just enough to confirm the spawn and reset the
+  # backoff); a fast Vite start breaks out in one check.
+  _ensure_service "Vite client" "http://localhost:5173/" \
+    "/tmp/codemap-client.lock" "/tmp/codemap-client.log" 6 \
+    nohup npm --prefix "$codemap_root" run dev:client
 }
