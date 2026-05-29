@@ -23,6 +23,7 @@ const CLIENT_PORT = 5173;
 const FILE_HOOK = path.join(CODEMAP_ROOT, 'hooks', 'file-activity-hook.sh');
 const THINKING_HOOK = path.join(CODEMAP_ROOT, 'hooks', 'thinking-hook.sh');
 const PERMISSION_HOOK = path.join(CODEMAP_ROOT, 'hooks', 'permission-hook.sh');
+const SESSION_HOOK = path.join(CODEMAP_ROOT, 'hooks', 'session-start-hook.sh');
 const GIT_POST_COMMIT_HOOK = path.join(CODEMAP_ROOT, 'hooks', 'git-post-commit.sh');
 
 // Claude settings to merge
@@ -76,6 +77,17 @@ const hooksConfig = {
         matcher: ".*",
         hooks: [{ type: "command", command: `${PERMISSION_HOOK}` }]
       }
+    ],
+    SessionStart: [
+      {
+        // Boots the hotel the instant a session opens, so the server is already
+        // up before the first tool call (the PreToolUse hooks remain the lazy
+        // fallback). Without this a freshly-opened session shows no server until
+        // the agent's first Read/Edit/Bash — and a session opened before the
+        // hooks were wired never starts one at all. No matcher: fire on every
+        // session source (startup, resume, clear).
+        hooks: [{ type: "command", command: `${SESSION_HOOK}` }]
+      }
     ]
   }
 };
@@ -88,7 +100,8 @@ const permissionsConfig = {
       `Bash(${FILE_HOOK} write:*)`,
       `Bash(${THINKING_HOOK} thinking-start:*)`,
       `Bash(${THINKING_HOOK} thinking-end:*)`,
-      `Bash(${PERMISSION_HOOK}:*)`
+      `Bash(${PERMISSION_HOOK}:*)`,
+      `Bash(${SESSION_HOOK}:*)`
     ]
   }
 };
@@ -186,7 +199,7 @@ async function run() {
 // True if a hook entry belongs to CodeMap (so we can replace it idempotently).
 function isCodemapHook(entry) {
   const s = JSON.stringify(entry);
-  return s.includes('file-activity-hook') || s.includes('thinking-hook') || s.includes('permission-hook');
+  return s.includes('file-activity-hook') || s.includes('thinking-hook') || s.includes('permission-hook') || s.includes('session-start-hook');
 }
 
 // Setup Claude Code hooks GLOBALLY (~/.claude/settings.json).
@@ -223,7 +236,7 @@ function setupClaudeHooks() {
   if (!settings.permissions) settings.permissions = {};
   if (!settings.permissions.allow) settings.permissions.allow = [];
   settings.permissions.allow = settings.permissions.allow.filter(
-    p => !p.includes('file-activity-hook') && !p.includes('thinking-hook') && !p.includes('permission-hook')
+    p => !p.includes('file-activity-hook') && !p.includes('thinking-hook') && !p.includes('permission-hook') && !p.includes('session-start-hook')
   );
   settings.permissions.allow.push(...permissionsConfig.permissions.allow);
 
@@ -301,6 +314,7 @@ function setupHooks() {
     fs.chmodSync(FILE_HOOK, '755');
     fs.chmodSync(THINKING_HOOK, '755');
     fs.chmodSync(PERMISSION_HOOK, '755');
+    fs.chmodSync(SESSION_HOOK, '755');
     fs.chmodSync(GIT_POST_COMMIT_HOOK, '755');
   } catch (e) {
     // Ignore chmod errors
