@@ -89,23 +89,24 @@ export function TtyProvider({ children }: { children: ReactNode }) {
   return (
     <TtyContext.Provider value={control}>
       {children}
-      {/* Seul le panneau actif est monté — xterm.js requiert un conteneur
-          visible pour initialiser son renderer. Le buffer serveur assure
-          le replay de l'historique à chaque (re)connexion. */}
-      {ttySessions.map(session =>
-        session.ttyId === openTtyId ? (
-          <TtyPanel
-            key={session.ttyId}
-            ttyId={session.ttyId}
-            title={session.title}
-            cwd={session.cwd}
-            rightOffset={rightOffset}
-            onClose={() => closeTty(session.ttyId)}
-            onMinimize={hideTty}
-            onRename={newTitle => renameTty(session.ttyId, newTitle)}
-          />
-        ) : null
-      )}
+      {/* Tous les panneaux restent montés ; seul l'actif est visible
+          (visibility:hidden pour les autres, pas display:none — ce dernier met les
+          dimensions à zéro et fait planter fitAddon.fit()). Garder le xterm + la WS
+          vivants préserve l'état du terminal (mode souris de tmux, alt-screen…) au
+          switch, ce que le replay brut de 64 KB ne peut pas reconstruire. */}
+      {ttySessions.map(session => (
+        <TtyPanel
+          key={session.ttyId}
+          ttyId={session.ttyId}
+          title={session.title}
+          cwd={session.cwd}
+          rightOffset={rightOffset}
+          active={session.ttyId === openTtyId}
+          onClose={() => closeTty(session.ttyId)}
+          onMinimize={hideTty}
+          onRename={newTitle => renameTty(session.ttyId, newTitle)}
+        />
+      ))}
     </TtyContext.Provider>
   );
 }

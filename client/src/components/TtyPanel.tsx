@@ -31,13 +31,16 @@ interface TtyPanelProps {
   title: string;
   cwd: string;
   rightOffset: number;
+  active: boolean;
   onClose: () => void;
   onMinimize: () => void;
   onRename: (newTitle: string) => void;
 }
 
-export function TtyPanel({ ttyId, title, cwd, rightOffset, onClose, onMinimize, onRename }: TtyPanelProps) {
+export function TtyPanel({ ttyId, title, cwd, rightOffset, active, onClose, onMinimize, onRename }: TtyPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const termRef = useRef<Terminal | null>(null);
+  const fitAddonRef = useRef<FitAddon | null>(null);
 
   // ── Rename ──────────────────────────────────────────────────────────────────
   const [editing, setEditing] = useState(false);
@@ -103,6 +106,8 @@ export function TtyPanel({ ttyId, title, cwd, rightOffset, onClose, onMinimize, 
     term.loadAddon(webLinksAddon);
     term.open(containerRef.current);
     fitAddon.fit();
+    termRef.current = term;
+    fitAddonRef.current = fitAddon;
 
     const ws = new WebSocket(`${WS_URL}/ws/tty/${ttyId}`);
     ws.onopen = () => {
@@ -132,19 +137,38 @@ export function TtyPanel({ ttyId, title, cwd, rightOffset, onClose, onMinimize, 
     });
     if (containerRef.current) ro.observe(containerRef.current);
 
-    return () => { ro.disconnect(); ws.close(); term.dispose(); };
+    return () => {
+      ro.disconnect();
+      ws.close();
+      term.dispose();
+      termRef.current = null;
+      fitAddonRef.current = null;
+    };
   }, [ttyId]);
+
+  // Le panel reste monté quand on en ouvre un autre (état xterm + WS préservés,
+  // donc le mode souris de tmux survit au switch). Au retour : re-fit défensif si
+  // la fenêtre a changé pendant qu'on était caché, puis focus pour router les frappes.
+  useEffect(() => {
+    if (!active) return;
+    fitAddonRef.current?.fit();
+    termRef.current?.focus();
+  }, [active]);
 
   const short = cwdShort(cwd);
 
   return (
     <div style={{
-      position: 'absolute', bottom: 16, right: rightOffset, zIndex: 25,
+      position: 'absolute', bottom: 16, right: rightOffset, zIndex: active ? 26 : 25,
       width: panelWidth, height: 'min(52vh, 520px)',
       display: 'flex', flexDirection: 'column', fontFamily: 'monospace',
       background: '#0d0d0d', color: '#f0f0f0',
       border: '4px solid #333', boxShadow: '8px 8px 0 rgba(0,0,0,0.35)',
       overflow: 'visible',
+      // Caché mais TOUJOURS monté : visibility (≠ display:none) garde des dimensions
+      // réelles pour fitAddon.fit(), et conserve le xterm + la WS vivants au switch.
+      visibility: active ? 'visible' : 'hidden',
+      pointerEvents: active ? 'auto' : 'none',
     }}>
       {/* Poignée de redimensionnement — bord gauche */}
       <div
