@@ -104,6 +104,13 @@ const menuItem: CSSProperties = {
   padding: '8px 14px', cursor: 'pointer', color: '#e5e7eb',
 };
 
+// Inline rename input, shared by the agent rows and the terminal rows.
+const renameInput: CSSProperties = {
+  width: '100%', boxSizing: 'border-box', fontSize: 13,
+  background: 'rgba(255,255,255,0.1)', color: '#fff',
+  border: '1px solid rgba(255,255,255,0.3)', borderRadius: 4, padding: '2px 4px',
+};
+
 const clearBtn: CSSProperties = {
   background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)',
   color: '#e5e7eb', fontSize: 11, padding: '2px 8px', borderRadius: 6, cursor: 'pointer',
@@ -122,12 +129,14 @@ export function AgentRosterPanel({ onSelectAgent, onOpenChat, onRespond, onOpenT
   onOpenTty?: (ttyId: string) => void;
 }) {
   const { groups, clearAgents, stopAgent } = useAgentRoster();
-  const { ttySessions, spawnTty, closeTty, openTtyId, openTty, hideTty } = useTty();
+  const { ttySessions, spawnTty, closeTty, openTtyId, openTty, hideTty, renameTty } = useTty();
   const [collapsed, setCollapsed] = useState(() => loadBool(COLLAPSED_KEY));
   const [ttyCollapsed, setTtyCollapsed] = useState(() => loadBool(TTY_COLLAPSED_KEY));
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => loadSet(GROUPS_KEY));
   const [menu, setMenu] = useState<{ agentId: string; baseName: string; spawned: boolean; x: number; y: number } | null>(null);
   const [editing, setEditing] = useState<{ agentId: string; value: string } | null>(null);
+  const [ttyMenu, setTtyMenu] = useState<{ ttyId: string; x: number; y: number } | null>(null);
+  const [ttyEditing, setTtyEditing] = useState<{ ttyId: string; value: string } | null>(null);
 
   const totalAgents = groups.reduce((n, g) => n + g.agents.length, 0);
 
@@ -151,19 +160,24 @@ export function AgentRosterPanel({ onSelectAgent, onOpenChat, onRespond, onOpenT
     try { localStorage.setItem(GROUPS_KEY, JSON.stringify([...next])); } catch { /* ignore */ }
   };
 
-  // Close the context menu on any outside click or Escape.
+  // Close any context menu (agent or terminal) on an outside click or Escape.
   useEffect(() => {
-    if (!menu) return;
-    const close = () => setMenu(null);
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenu(null); };
+    if (!menu && !ttyMenu) return;
+    const close = () => { setMenu(null); setTtyMenu(null); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
     window.addEventListener('click', close);
     window.addEventListener('keydown', onKey);
     return () => { window.removeEventListener('click', close); window.removeEventListener('keydown', onKey); };
-  }, [menu]);
+  }, [menu, ttyMenu]);
 
   const commitEdit = () => {
     if (editing) setAgentName(editing.agentId, editing.value);
     setEditing(null);
+  };
+
+  const commitTtyEdit = () => {
+    if (ttyEditing) renameTty(ttyEditing.ttyId, ttyEditing.value);
+    setTtyEditing(null);
   };
 
   const now = Date.now();
@@ -231,11 +245,7 @@ export function AgentRosterPanel({ onSelectAgent, onOpenChat, onRespond, onOpenT
                                 else if (e.key === 'Escape') setEditing(null);
                               }}
                               onBlur={commitEdit}
-                              style={{
-                                width: '100%', boxSizing: 'border-box', fontSize: 13,
-                                background: 'rgba(255,255,255,0.1)', color: '#fff',
-                                border: '1px solid rgba(255,255,255,0.3)', borderRadius: 4, padding: '2px 4px',
-                              }}
+                              style={renameInput}
                             />
                           ) : (
                             <>
@@ -287,19 +297,45 @@ export function AgentRosterPanel({ onSelectAgent, onOpenChat, onRespond, onOpenT
               {ttySessions.length === 0 && (
                 <div style={{ padding: '6px 14px', color: '#8a93a6', fontSize: 12 }}>Aucun terminal.</div>
               )}
-              {ttySessions.map(tty => (
-                <div key={tty.ttyId} style={row}>
+              {ttySessions.map(tty => {
+                const isEditing = ttyEditing?.ttyId === tty.ttyId;
+                return (
+                <div
+                  key={tty.ttyId}
+                  style={row}
+                  onContextMenu={e => {
+                    e.preventDefault();
+                    setTtyMenu({ ttyId: tty.ttyId, x: e.clientX, y: e.clientY });
+                  }}
+                >
                   <span style={{
                     width: 9, height: 9, borderRadius: '50%', flexShrink: 0,
                     backgroundColor: '#34d399', boxShadow: '0 0 6px #34d39980',
                   }} />
                   <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      {tty.title}
-                    </div>
-                    <div style={{ fontSize: 11, color: '#8a93a6', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      {cwdShort(tty.cwd)}
-                    </div>
+                    {isEditing ? (
+                      <input
+                        autoFocus
+                        value={ttyEditing!.value}
+                        onClick={e => e.stopPropagation()}
+                        onChange={e => setTtyEditing({ ttyId: tty.ttyId, value: e.target.value })}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') commitTtyEdit();
+                          else if (e.key === 'Escape') setTtyEditing(null);
+                        }}
+                        onBlur={commitTtyEdit}
+                        style={renameInput}
+                      />
+                    ) : (
+                      <>
+                        <div style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {tty.title}
+                        </div>
+                        <div style={{ fontSize: 11, color: '#8a93a6', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {cwdShort(tty.cwd)}
+                        </div>
+                      </>
+                    )}
                   </div>
                   <div style={{ display: 'flex', gap: 4 }} onClick={e => e.stopPropagation()}>
                     {openTtyId === tty.ttyId ? (
@@ -310,7 +346,8 @@ export function AgentRosterPanel({ onSelectAgent, onOpenChat, onRespond, onOpenT
                     <button style={{ ...actionBtn, color: '#f87171' }} title="Fermer le terminal" onClick={() => closeTty(tty.ttyId)}>✕</button>
                   </div>
                 </div>
-              ))}
+                );
+              })}
               </>
             )}
           </div>
@@ -342,6 +379,20 @@ export function AgentRosterPanel({ onSelectAgent, onOpenChat, onRespond, onOpenT
               setMenu(null);
             }}
           >{menu.spawned ? "Arrêter l'agent" : "Retirer de l'hôtel"}</div>
+        </div>
+      )}
+
+      {ttyMenu && (
+        <div style={{ ...menuStyle, left: ttyMenu.x, top: ttyMenu.y }} onClick={e => e.stopPropagation()}>
+          <div
+            style={menuItem}
+            onMouseDown={e => e.preventDefault()}
+            onClick={() => {
+              const tty = ttySessions.find(t => t.ttyId === ttyMenu.ttyId);
+              setTtyEditing({ ttyId: ttyMenu.ttyId, value: tty?.title ?? '' });
+              setTtyMenu(null);
+            }}
+          >Renommer</div>
         </div>
       )}
     </>
