@@ -67,7 +67,15 @@ export class ActivityStore {
       .on('add', (filePath: string) => this.handleFileAdd(filePath, false))
       .on('addDir', (filePath: string) => this.handleFileAdd(filePath, true))
       .on('unlink', (filePath: string) => this.handleFileRemove(filePath))
-      .on('unlinkDir', (filePath: string) => this.handleFileRemove(filePath));
+      .on('unlinkDir', (filePath: string) => this.handleFileRemove(filePath))
+      // Un fichier non surveillable (EACCES sur un disque monté, lien cassé, ENOSPC…)
+      // ne doit PAS tuer le serveur : sans listener, chokidar relance 'error' en
+      // exception fatale qui termine le process. On log et on continue de surveiller
+      // le reste de l'arbre.
+      .on('error', (err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`[${new Date().toISOString()}] Watcher error for ${this.projectRoot}: ${msg}`);
+      });
 
     console.log(`[${new Date().toISOString()}] File watcher started for ${this.projectRoot}`);
   }
