@@ -41,6 +41,10 @@ export function TtyPanel({ ttyId, title, cwd, rightOffset, active, onClose, onMi
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const roRef = useRef<ResizeObserver | null>(null);
+  const openRafRef = useRef<number>();
+  const openedRef = useRef(false);
 
   // ── Rename ──────────────────────────────────────────────────────────────────
   const [editing, setEditing] = useState(false);
@@ -90,70 +94,103 @@ export function TtyPanel({ ttyId, title, cwd, rightOffset, active, onClose, onMi
     };
   }, []);
 
-  // ── xterm ────────────────────────────────────────────────────────────────────
-  useEffect(() => {
-    if (!containerRef.current) return;
+  // ── xterm (ouverture paresseuse) ─────────────────────────────────────────────
+  // fit() lit RenderService.dimensions ; tant que le terminal n'est pas ouvert ou que
+  // le conteneur n'a pas de taille, le renderer n'existe pas → on s'abstient (le try
+  // couvre le timing renderer-après-open de xterm 5.3).
+  const safeFit = useCallback(() => {
+    const el = containerRef.current;
+    if (!fitAddonRef.current || !el || el.clientWidth === 0 || el.clientHeight === 0) return;
+    try { fitAddonRef.current.fit(); } catch { /* renderer pas encore prêt */ }
+  }, []);
 
-    const term = new Terminal({
-      cursorBlink: true,
-      fontSize: 13,
-      fontFamily: 'monospace',
-      theme: { background: '#0d0d0d', foreground: '#f0f0f0', cursor: '#f0f0f0' },
-    });
-    const fitAddon = new FitAddon();
-    const webLinksAddon = new WebLinksAddon();
-    term.loadAddon(fitAddon);
-    term.loadAddon(webLinksAddon);
-    term.open(containerRef.current);
-    fitAddon.fit();
-    termRef.current = term;
-    fitAddonRef.current = fitAddon;
+  // Ouvre xterm + la WS UNE SEULE FOIS, à la première fois que le panneau est visible.
+  // Ouvrir sur un conteneur caché (visibility:hidden) empêche xterm d'initialiser son
+  // renderer (mesure de glyphe à 0, surtout sous Firefox) → crash sur .dimensions.
+  const initTerminal = useCallback(() => {
+    if (openedRef.current || !containerRef.current) return;
+    openedRef.current = true;
 
-    const ws = new WebSocket(`${WS_URL}/ws/tty/${ttyId}`);
-    ws.onopen = () => {
-      const { cols, rows } = term;
-      ws.send(JSON.stringify({ type: 'resize', cols, rows }));
-    };
-    ws.onmessage = (e) => {
-      if (typeof e.data === 'string') {
-        try {
-          const msg = JSON.parse(e.data);
-          if (msg.type === 'exit') term.write('\r\n[Process exited]\r\n');
-        } catch {
-          term.write(e.data);
-        }
-      }
-    };
-    term.onData((data) => {
-      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'input', data }));
-    });
+    // open() lui-même est planifié dans un rAF annulable : un mount StrictMode jeté
+    // l'annule au cleanup avant exécution, donc pas de setTimeout Viewport orphelin.
+    openRafRef.current = requestAnimationFrame(() => {
+      const container = containerRef.current;
+      if (!container) return;
 
-    const ro = new ResizeObserver(() => {
-      fitAddon.fit();
-      if (ws.readyState === WebSocket.OPEN) {
+      const term = new Terminal({
+        cursorBlink: true,
+        fontSize: 13,
+        fontFamily: 'monospace',
+        theme: { background: '#0d0d0d', foreground: '#f0f0f0', cursor: '#f0f0f0' },
+      });
+      const fitAddon = new FitAddon();
+      term.loadAddon(fitAddon);
+      term.loadAddon(new WebLinksAddon());
+      term.open(container);
+      termRef.current = term;
+      fitAddonRef.current = fitAddon;
+      // Premier fit dans un tick SÉPARÉ d'open() : le RenderService de xterm 5.3 n'est
+      // pas garanti initialisé dès le retour d'open().
+      requestAnimationFrame(safeFit);
+
+      const ws = new WebSocket(`${WS_URL}/ws/tty/${ttyId}`);
+      wsRef.current = ws;
+      ws.onopen = () => {
         const { cols, rows } = term;
         ws.send(JSON.stringify({ type: 'resize', cols, rows }));
-      }
+      };
+      ws.onmessage = (e) => {
+        if (typeof e.data === 'string') {
+          try {
+            const msg = JSON.parse(e.data);
+            if (msg.type === 'exit') term.write('\r\n[Process exited]\r\n');
+          } catch {
+            term.write(e.data);
+          }
+        }
+      };
+      term.onData((data) => {
+        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'input', data }));
+      });
+
+      const ro = new ResizeObserver(() => {
+        safeFit();
+        if (ws.readyState === WebSocket.OPEN) {
+          const { cols, rows } = term;
+          ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+        }
+      });
+      ro.observe(container);
+      roRef.current = ro;
     });
-    if (containerRef.current) ro.observe(containerRef.current);
+  }, [ttyId, safeFit]);
 
-    return () => {
-      ro.disconnect();
-      ws.close();
-      term.dispose();
-      termRef.current = null;
-      fitAddonRef.current = null;
-    };
-  }, [ttyId]);
+  // Teardown au UNMOUNT uniquement (session fermée) — surtout PAS sur active→false,
+  // pour garder le terminal + la WS vivants au switch (mode souris tmux, alt-screen).
+  // En StrictMode, ce cleanup annule l'openRaf du mount jeté avant qu'il ne s'exécute.
+  useEffect(() => () => {
+    if (openRafRef.current) cancelAnimationFrame(openRafRef.current);
+    roRef.current?.disconnect();
+    wsRef.current?.close();
+    termRef.current?.dispose();
+    termRef.current = null;
+    fitAddonRef.current = null;
+    wsRef.current = null;
+    roRef.current = null;
+    openedRef.current = false;
+  }, []);
 
-  // Le panel reste monté quand on en ouvre un autre (état xterm + WS préservés,
-  // donc le mode souris de tmux survit au switch). Au retour : re-fit défensif si
-  // la fenêtre a changé pendant qu'on était caché, puis focus pour router les frappes.
+  // À l'activation : ouvre paresseusement au premier affichage, puis re-fit défensif
+  // (la fenêtre a pu changer pendant qu'on était caché) + focus pour router les frappes.
   useEffect(() => {
     if (!active) return;
-    fitAddonRef.current?.fit();
-    termRef.current?.focus();
-  }, [active]);
+    initTerminal();
+    const id = requestAnimationFrame(() => {
+      safeFit();
+      termRef.current?.focus();
+    });
+    return () => cancelAnimationFrame(id);
+  }, [active, initTerminal, safeFit]);
 
   const short = cwdShort(cwd);
 

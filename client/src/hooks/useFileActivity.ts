@@ -80,6 +80,13 @@ export function useFileActivity(projectId?: string): {
 
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<number>();
+  // Ouverture du socket différée d'un tick : un mount StrictMode aussitôt démonté
+  // annule ce timer avant d'avoir ouvert un socket qu'il faudrait abandonner
+  // (« interrompue pendant le chargement de la page »).
+  const connectTimerRef = useRef<number>();
+  // Passe à true au premier open réussi. Avant ça, les erreurs WS sont attendues
+  // (serveur en cours de démarrage) et gérées par le reconnect — on ne les logge pas.
+  const hasConnectedRef = useRef(false);
 
   const connect = useCallback(() => {
     connectionStatusRef.current = 'connecting';
@@ -102,28 +109,7 @@ export function useFileActivity(projectId?: string): {
       })
       .catch(console.error);
 
-    // Establish WebSocket connection
-    const ws = new WebSocket(WS_URL);
-    wsRef.current = ws;
-
-    ws.onopen = () => {
-      console.log('WebSocket connected');
-      connectionStatusRef.current = 'connected';
-    };
-
-    ws.onclose = () => {
-      console.log('WebSocket disconnected');
-      connectionStatusRef.current = 'disconnected';
-      // Reconnect after 2 seconds
-      reconnectTimeoutRef.current = window.setTimeout(connect, 2000);
-    };
-
-    ws.onerror = (error) => {
-      console.error('WebSocket error:', error);
-      connectionStatusRef.current = 'disconnected';
-    };
-
-    ws.onmessage = (event) => {
+    const handleMessage = (event: MessageEvent) => {
       try {
         const message = JSON.parse(event.data);
         // Ignore messages for other buildings when scoped to one project.
@@ -189,6 +175,34 @@ export function useFileActivity(projectId?: string): {
         console.error('Failed to parse message:', err);
       }
     };
+
+    // Ouvre le socket un tick plus tard (cf. connectTimerRef) pour éviter qu'un
+    // mount StrictMode aussitôt démonté ouvre un socket à abandonner.
+    connectTimerRef.current = window.setTimeout(() => {
+      const ws = new WebSocket(WS_URL);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        hasConnectedRef.current = true;
+        console.log('WebSocket connected');
+        connectionStatusRef.current = 'connected';
+      };
+
+      ws.onclose = () => {
+        connectionStatusRef.current = 'disconnected';
+        // Reconnect after 2 seconds
+        reconnectTimeoutRef.current = window.setTimeout(connect, 2000);
+      };
+
+      ws.onerror = () => {
+        connectionStatusRef.current = 'disconnected';
+        // Silencieux pendant la phase de connexion/démarrage serveur (erreur attendue,
+        // gérée par le reconnect) ; on ne logge qu'une chute après connexion établie.
+        if (hasConnectedRef.current) console.error('WebSocket error after connect');
+      };
+
+      ws.onmessage = handleMessage;
+    }, 0);
   }, []);
 
   // Re-scope the graph when the watched building changes WITHOUT reconnecting the
@@ -206,6 +220,9 @@ export function useFileActivity(projectId?: string): {
     connect();
 
     return () => {
+      if (connectTimerRef.current) {
+        clearTimeout(connectTimerRef.current);
+      }
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
       }

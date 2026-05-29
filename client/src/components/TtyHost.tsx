@@ -89,11 +89,13 @@ export function TtyProvider({ children }: { children: ReactNode }) {
   return (
     <TtyContext.Provider value={control}>
       {children}
-      {/* Tous les panneaux restent montés ; seul l'actif est visible
-          (visibility:hidden pour les autres, pas display:none — ce dernier met les
-          dimensions à zéro et fait planter fitAddon.fit()). Garder le xterm + la WS
-          vivants préserve l'état du terminal (mode souris de tmux, alt-screen…) au
-          switch, ce que le replay brut de 64 KB ne peut pas reconstruire. */}
+      {/* Tous les panneaux restent montés ; seul l'actif est visible (visibility:hidden
+          pour les autres, pas display:none — ce dernier met les dimensions à zéro).
+          Garder le xterm + la WS vivants préserve l'état du terminal (mode souris de
+          tmux, alt-screen…) au switch, ce que le replay brut de 64 KB ne peut pas
+          reconstruire. TtyPanel n'ouvre xterm qu'à la PREMIÈRE activation (lazy-open) :
+          ouvrir sur un conteneur caché empêche xterm d'initialiser son renderer
+          (mesure de glyphe à 0 sous Firefox) → crash sur .dimensions. */}
       {ttySessions.map(session => (
         <TtyPanel
           key={session.ttyId}
