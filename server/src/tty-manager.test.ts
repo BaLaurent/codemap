@@ -5,7 +5,13 @@ vi.mock('node-pty', () => ({
   spawn: vi.fn(),
 }));
 
+// Mock os pour contrôler le shell de connexion résolu depuis /etc/passwd
+vi.mock('os', () => ({
+  userInfo: vi.fn(() => ({ shell: '/usr/bin/bash' })),
+}));
+
 import * as pty from 'node-pty';
+import * as os from 'os';
 
 function makeMockPty() {
   const listeners: { data: Array<(d: string) => void>; exit: Array<(e: { exitCode: number }) => void> } = { data: [], exit: [] };
@@ -35,6 +41,16 @@ describe('TtyManager', () => {
     expect(info.cwd).toBe('/tmp/test');
     expect(info.title).toMatch(/^TTY \d+$/);
     expect(info.shell).toMatch(/bash|zsh|sh/);
+  });
+
+  it('spawn() utilise le shell de connexion (/etc/passwd), pas /bin/sh hérité', async () => {
+    // Régression : le serveur est lancé par un hook sous /bin/sh ; sans ce fix,
+    // tty-manager spawnait /bin/sh (= bash mode POSIX) qui ignore ~/.bashrc.
+    vi.mocked(os.userInfo).mockReturnValue({ shell: '/usr/bin/bash' } as ReturnType<typeof os.userInfo>);
+    process.env.SHELL = '/bin/sh';
+    const { ttyManager } = await import('./tty-manager.js');
+    ttyManager.spawn('/tmp/test');
+    expect(pty.spawn).toHaveBeenCalledWith('/usr/bin/bash', [], expect.any(Object));
   });
 
   it('list() retourne les sessions actives', async () => {
