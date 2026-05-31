@@ -18,6 +18,7 @@ import { appendChatMessage, getTranscript, clearTranscripts } from './transcript
 import { attachmentDir, reserveAttachmentPath } from './attachments.js';
 import { fileFromActivityEvent } from './agent-file.js';
 import { registerRequest, awaitDecision, resolveRequest, resolveAgentRequests } from './pending-requests.js';
+import { shouldFlagWaitingForPermission, clearPendingInteraction } from './pending-interaction.js';
 import { spawnAgent, sendMessage as runnerSendMessage, stopAgent, getAgentCapabilities, getProjectCapabilities, setMode as runnerSetMode, setModel as runnerSetModel, setMaxThinkingTokens as runnerSetMaxThinkingTokens, isRunning, type PermissionRequest } from './agent-runner/index.js';
 import type { PermissionMode } from '@anthropic-ai/claude-agent-sdk';
 import { resolveEffortOptions, effortToMaxThinkingTokens, isEffortValue } from './effort-options.js';
@@ -293,12 +294,9 @@ setInterval(() => {
 
     // Check for agents stuck waiting for permission
     for (const state of agentStates.values()) {
-      if (state.pendingToolStart && !state.waitingForInput) {
-        const waitTime = now - state.pendingToolStart;
-        if (waitTime > WAITING_FOR_INPUT_THRESHOLD_MS) {
-          state.waitingForInput = true;
-          console.log(`[${new Date().toISOString()}] Agent ${state.displayName} appears to be waiting for permission (${waitTime}ms)`);
-        }
+      if (shouldFlagWaitingForPermission(state, now, WAITING_FOR_INPUT_THRESHOLD_MS)) {
+        state.waitingForInput = true;
+        console.log(`[${new Date().toISOString()}] Agent ${state.displayName} appears to be waiting for permission (${now - state.pendingToolStart!}ms)`);
       }
     }
 
@@ -574,10 +572,13 @@ app.post('/api/agent/:agentId/permission', (req, res) => {
   }
   const resolved = resolveRequest(agentId, requestId, outcome);
   if (resolved) {
-    // Lift the waiting flag now that the user has decided.
+    // Lift the pending-interaction flags now that the user has decided. Clearing
+    // pendingToolStart is essential: an answered AskUserQuestion is denied, so no
+    // PostToolUse fires — leaving it set lets the periodic detector re-raise the
+    // already-answered question seconds later.
     const state = agentStates.get(agentId);
     if (state) {
-      state.waitingForInput = false;
+      clearPendingInteraction(state);
       wsManager.broadcast('thinking', getAgentStatesArray());
     }
     wsManager.broadcast('permission-resolved', { agentId, requestId });
@@ -627,7 +628,7 @@ async function requestPermission(agentId: string, req: PermissionRequest): Promi
     toolName: req.toolName, toolInput: req.toolInput, title: req.title, description: req.description,
   });
   const outcome = await awaitDecision(agentId, req.toolUseID, PERMISSION_WAIT_MS);
-  if (state) { state.waitingForInput = false; wsManager.broadcast('thinking', getAgentStatesArray()); }
+  if (state) { clearPendingInteraction(state); wsManager.broadcast('thinking', getAgentStatesArray()); }
   // On timeout the POST /permission handler never ran, so close any open modal.
   if (outcome.outcome === 'timeout') wsManager.broadcast('permission-resolved', { agentId, requestId: req.toolUseID });
   return outcome;
@@ -828,7 +829,7 @@ app.post('/api/agent/:agentId/mode', async (req, res) => {
       for (const requestId of resolveAgentRequests(agentId, { outcome: 'allow' })) {
         wsManager.broadcast('permission-resolved', { agentId, requestId });
       }
-      if (state) state.waitingForInput = false;
+      if (state) clearPendingInteraction(state);
     }
     wsManager.broadcast('thinking', getAgentStatesArray());
   }
